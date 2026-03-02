@@ -26,6 +26,6 @@ https://clidocs.io/owner/repo
 
 <div align="center">
 
-*AI-generated docs • ~2-3s latency • 30-day cache*
+*⚠️ Works half the time, every time*
 
 </div>
