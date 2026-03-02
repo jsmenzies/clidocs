@@ -35,7 +35,9 @@ export class GitHubClient {
     }
 
     if (!response.ok) {
-      throw new Error(`GitHub API error: ${response.status}`);
+      const body = await response.text().catch(() => 'No body');
+      console.error(`[GitHub] Repo contents error ${response.status}: ${body}`);
+      throw new Error(`GitHub API error: ${response.status} - ${response.statusText}. Body: ${body}`);
     }
 
     const data = await response.json() as { tree: Array<{ path: string; type: string }> };
@@ -81,7 +83,9 @@ export class GitHubClient {
     }
 
     if (!response.ok) {
-      throw new Error(`GitHub API error: ${response.status}`);
+      const body = await response.text().catch(() => 'No body');
+      console.error(`[GitHub] README error ${response.status}: ${body}`);
+      throw new Error(`GitHub API error: ${response.status} - ${response.statusText}. Body: ${body}`);
     }
 
     const data = await response.json() as { content: string; encoding: string };

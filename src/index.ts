@@ -138,7 +138,7 @@ async function handleStreamingGeneration(
       ]);
       
       if (!readme) {
-        const notFoundMarkdown = `# ${repo}\n\nRepository not found or has no README.`;
+        const notFoundMarkdown = `# ${repo}\n\nRepository not found or has no README.\n\nThis usually means:\n- The repository doesn't exist\n- The repository has no README file\n- GitHub API rate limit exceeded (60 requests/hour without token)`;
         await writer.write(encoder.encode(`\n${notFoundMarkdown}`));
         await writer.close();
         
