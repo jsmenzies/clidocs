@@ -2,7 +2,9 @@
 
 # clidocs
 
-Instant CLI documentation from source code.
+blah, blah, blah cli > mcp
+
+CLI documentation from source code
 
 Paste any GitHub URL and get comprehensive command docs.
 
