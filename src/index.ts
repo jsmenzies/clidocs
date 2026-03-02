@@ -4,17 +4,16 @@ import { Cache } from './cache';
 import { analyzeAndGenerateDocsWithStreaming } from './llm/analyzer';
 
 const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <rect width="100" height="100" rx="16" fill="#1e1e2e"/>
-  <rect x="10" y="20" width="80" height="60" rx="6" fill="#313244"/>
-  <circle cx="22" cy="32" r="3" fill="#f38ba8"/>
-  <circle cx="32" cy="32" r="3" fill="#f9e2af"/>
-  <circle cx="42" cy="32" r="3" fill="#a6e3a1"/>
-  <text x="18" y="52" font-family="monospace" font-size="16" fill="#94e2d5">$</text>
-  <text x="30" y="52" font-family="monospace" font-size="14" fill="#cdd6f4">clidocs</text>
-  <rect x="82" y="42" width="2" height="14" fill="#cdd6f4">
-    <animate attributeName="opacity" values="1;0;1" dur="1s" repeatCount="indefinite"/>
-  </rect>
-  <text x="50" y="82" font-family="monospace" font-size="8" fill="#89b4fa" text-anchor="middle">CLI DOCS</text>
+  <!-- Background circle -->
+  <circle cx="50" cy="50" r="45" fill="#6366f1"/>
+  
+  <!-- Greater than symbol -->
+  <path d="M35 30 L65 50 L35 70" stroke="#ffffff" stroke-width="8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Underscore -->
+  <line x1="40" y1="72" x2="60" y2="72" stroke="#10b981" stroke-width="6" stroke-linecap="round">
+    <animate attributeName="opacity" values="1;0.3;1" dur="1.2s" repeatCount="indefinite"/>
+  </line>
 </svg>`;
 
 export default {
@@ -28,6 +27,16 @@ export default {
         headers: {
           'Content-Type': 'image/svg+xml',
           'Cache-Control': 'public, max-age=86400'
+        }
+      });
+    }
+    
+    // Redirect homepage to GitHub repo
+    if (path === '/' || path === '') {
+      return new Response(null, {
+        status: 302,
+        headers: {
+          'Location': 'https://github.com/jsmenzies/clidocs'
         }
       });
     }
@@ -113,6 +122,13 @@ async function handleStreamingGeneration(
     try {
       // Send initial loading message
       await writer.write(encoder.encode(`# Loading CLI documentation for ${owner}/${repo}...\n\n`));
+      
+      // Indicate cache status
+      if (skipCache) {
+        await writer.write(encoder.encode(`> Bypassing cache...\n`));
+      } else {
+        await writer.write(encoder.encode(`> Cache miss - generating fresh documentation...\n`));
+      }
       
       // Fetch repository data
       await writer.write(encoder.encode(`> Fetching repository data...\n`));

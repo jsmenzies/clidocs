@@ -18,3 +18,7 @@ binding = "AI"
 [[routes]]
 pattern = "clidocs.io"
 custom_domain = true
+
+[[routes]]
+pattern = "www.clidocs.io"
+custom_domain = true
