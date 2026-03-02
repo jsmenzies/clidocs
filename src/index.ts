@@ -1,14 +1,17 @@
 import { Env, GitHubRepo, CacheEntry } from './types';
 import { GitHubClient } from './github';
 import { Cache } from './cache';
-import { verifyIsCliTool } from './llm/stage1';
-import { generateCliDocs } from './llm/stage2';
-import { parseCliSections } from './parser';
+import { analyzeAndGenerateDocs } from './llm/analyzer';
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname.slice(1); // Remove leading slash
+    
+    // Handle cache invalidation endpoint
+    if (path === 'admin/invalidate-cache' && request.method === 'POST') {
+      return handleCacheInvalidation(env);
+    }
     
     // Parse owner/repo from path
     const parts = path.split('/');
@@ -61,11 +64,14 @@ export default {
     }
     
     // No cache or bypass - fetch from GitHub
-    // Token is optional - works without auth but has lower rate limits (60 req/hour)
     const github = new GitHubClient(env.GITHUB_TOKEN || null);
     
     try {
-      const readme = await github.fetchReadme(repoData);
+      // Fetch both README and repo structure
+      const [readme, repoContents] = await Promise.all([
+        github.fetchReadme(repoData),
+        github.fetchRepoContents(repoData)
+      ]);
       
       if (!readme) {
         const notFoundResponse: CacheEntry = {
@@ -87,22 +93,15 @@ export default {
         });
       }
       
-      // Stage 1: Verify if this is a CLI tool (cheap LLM)
-      const verification = await verifyIsCliTool(repoData, readme, env.AI);
-      
-      let markdown: string;
-      let isCli: boolean;
-      
-      if (verification.isCli && verification.confidence > 0.5) {
-        // Stage 2: Generate CLI documentation (better LLM)
-        markdown = await generateCliDocs(repoData, readme, env.AI);
-        isCli = true;
-      } else {
-        // Not a CLI tool - return message
-        markdown = `# ${repo}\n\nSource: github.com/${owner}/${repo}\n\nThis repository does not appear to be a CLI tool.\n\nConfidence: ${(verification.confidence * 100).toFixed(0)}%\n\n---\n\n*Detected by clidocs.io*  
-*AI Model: Llama 3.1 8B via Cloudflare Workers AI.*`;
-        isCli = false;
-      }
+      // Analyze repo and generate documentation
+      console.log(`[Main] Starting analysis for ${owner}/${repo}...`);
+      const { markdown, isCli } = await analyzeAndGenerateDocs(
+        repoData,
+        readme,
+        repoContents,
+        env.GITHUB_TOKEN || null,
+        env.AI
+      );
       
       // Cache the result
       const cacheEntry: CacheEntry = {
@@ -127,6 +126,7 @@ export default {
       
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Main] Error:', error);
       
       return new Response(
         `# Error\n\nFailed to fetch documentation for ${owner}/${repo}.\n\nError: ${errorMessage}\n\nPlease try again later.`,
@@ -141,3 +141,56 @@ export default {
     }
   }
 };
+
+async function handleCacheInvalidation(env: Env): Promise<Response> {
+  try {
+    // Get all keys from KV
+    const keys: string[] = [];
+    let cursor: string | undefined;
+    
+    // Cloudflare KV list returns paginated results
+    do {
+      const listResult = await env.CLIDOCS_CACHE.list({ cursor, limit: 1000 });
+      keys.push(...listResult.keys.map(k => k.name));
+      cursor = listResult.list_complete ? undefined : listResult.cursor;
+    } while (cursor);
+    
+    console.log(`[Admin] Found ${keys.length} cache entries to invalidate`);
+    
+    // Delete all keys
+    const deletePromises = keys.map(key => env.CLIDOCS_CACHE.delete(key));
+    await Promise.all(deletePromises);
+    
+    console.log(`[Admin] Successfully invalidated ${keys.length} cache entries`);
+    
+    return new Response(
+      JSON.stringify({ 
+        success: true, 
+        message: `Invalidated ${keys.length} cache entries`,
+        timestamp: new Date().toISOString()
+      }),
+      {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Admin] Cache invalidation failed:', error);
+    
+    return new Response(
+      JSON.stringify({ 
+        success: false, 
+        error: errorMessage 
+      }),
+      {
+        status: 500,
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+  }
+}

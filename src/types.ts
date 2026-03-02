@@ -15,3 +15,18 @@ export interface GitHubRepo {
   owner: string;
   repo: string;
 }
+
+export interface RepoContents {
+  files: string[];
+  directories: string[];
+  hasCliIndicators: boolean;
+}
+
+export interface CliFileAnalysis {
+  language: 'node' | 'go' | 'python' | 'rust' | 'ruby' | 'unknown';
+  isCliTool: boolean;
+  confidence: number;
+  indicators: string[];
+  entryPointFiles: string[];
+  configFiles: string[];
+}
