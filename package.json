@@ -1,0 +1,18 @@
+{
+  "name": "clidocs",
+  "version": "0.1.0",
+  "description": "Real-time CLI documentation from GitHub repos",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cloudflare/workers-types": "^4.20240222.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "wrangler": "^3.0.0"
+  }
+}
