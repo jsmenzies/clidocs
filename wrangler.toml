@@ -1,12 +1,20 @@
 name = "clidocs"
 main = "src/index.ts"
 compatibility_date = "2024-02-22"
+workers_dev = true
+preview_urls = true
 
 [[kv_namespaces]]
 binding = "CLIDOCS_CACHE"
 id = "dd332d8dc6b44c21bf0e715a6b68c294"
 
 [vars]
+AI_RATE_LIMIT = "100"           # Max AI calls per window
+AI_RATE_WINDOW = "3600"         # Window in seconds (1 hour = 3600)
 
 [ai]
 binding = "AI"
+
+[[routes]]
+pattern = "clidocs.io"
+custom_domain = true

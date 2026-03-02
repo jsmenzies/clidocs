@@ -2,6 +2,8 @@ export interface Env {
   CLIDOCS_CACHE: KVNamespace;
   GITHUB_TOKEN: string;
   AI?: any;
+  AI_RATE_LIMIT?: string;
+  AI_RATE_WINDOW?: string;
 }
 
 export interface CacheEntry {

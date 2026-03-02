@@ -1,5 +1,7 @@
 # clidocs
 
+Blah, blah, blah cli > mvp. Here's the docs for your agent to learn how to use CLI tools
+
 CLI documentation from GitHub repos.
 
 Automatically generates markdown documentation for any CLI tool's commands, flags, and usage examples.

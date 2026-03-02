@@ -1,5 +1,6 @@
-import { GitHubRepo, RepoContents } from '../types';
+import { Env, GitHubRepo, RepoContents } from '../types';
 import { fetchConfigFileContent } from './cliFileAnalysis';
+import { checkRateLimit } from '../rateLimiter';
 
 interface CliFileContent {
   path: string;
@@ -11,23 +12,53 @@ export async function analyzeAndGenerateDocs(
   readme: string,
   contents: RepoContents,
   token: string | null,
-  ai?: any
+  ai?: any,
+  env?: Env
+): Promise<{ markdown: string; isCli: boolean }> {
+  return analyzeAndGenerateDocsWithStreaming(repo, readme, contents, token, ai, env);
+}
+
+export async function analyzeAndGenerateDocsWithStreaming(
+  repo: GitHubRepo,
+  readme: string,
+  contents: RepoContents,
+  token: string | null,
+  ai?: any,
+  env?: Env,
+  progressCallback?: (message: string) => Promise<void>
 ): Promise<{ markdown: string; isCli: boolean }> {
   console.log(`[Analyzer] Processing ${repo.owner}/${repo.repo}...`);
   console.log(`[Analyzer] Repo has ${contents.files.length} files`);
 
   if (!ai) {
     console.log('[Analyzer] AI not available, using basic extraction');
-    return { 
+    return {
       markdown: generateBasicMarkdown(repo, readme, contents),
       isCli: detectCliFromFiles(contents)
     };
   }
 
+  // Check rate limit before using AI
+  if (env) {
+    const rateLimit = await checkRateLimit(env, 'ai');
+    if (!rateLimit.allowed) {
+      console.log(`[Analyzer] AI rate limit exceeded. Reset at ${rateLimit.resetTime}`);
+      throw new Error(`RATE_LIMIT_EXCEEDED:${rateLimit.resetTime.toISOString()}`);
+    }
+    console.log(`[Analyzer] Rate limit check passed. Remaining: ${rateLimit.remaining}`);
+  }
+
   // Step 1: Use heuristic to pre-select likely CLI files (no AI)
   console.log('[Analyzer] Pre-selecting CLI files...');
-  const preselectedFiles = heuristicFileSelection(contents);
+  if (progressCallback) {
+    await progressCallback('Identifying CLI-related files...');
+  }
+  const preselectedFiles = await heuristicFileSelection(repo, contents, token);
   console.log(`[Analyzer] Pre-selected ${preselectedFiles.length} files`);
+
+  if (progressCallback) {
+    await progressCallback(`Found ${preselectedFiles.length} potential CLI files`);
+  }
 
   if (preselectedFiles.length === 0) {
     console.log('[Analyzer] No CLI files detected');
@@ -39,8 +70,15 @@ export async function analyzeAndGenerateDocs(
 
   // Step 2: Fetch file contents
   console.log('[Analyzer] Fetching file contents...');
+  if (progressCallback) {
+    await progressCallback('Fetching file contents...');
+  }
   const fileContents = await fetchFiles(repo, preselectedFiles, token);
-  
+
+  if (progressCallback) {
+    await progressCallback(`Fetched ${fileContents.length} files`);
+  }
+
   if (fileContents.length === 0) {
     console.log('[Analyzer] Failed to fetch any files');
     return {
@@ -53,12 +91,23 @@ export async function analyzeAndGenerateDocs(
 
   // Step 3: Single AI call to analyze everything and generate docs
   console.log('[Analyzer] Analyzing and generating documentation...');
+  if (progressCallback) {
+    await progressCallback('Generating documentation with AI...');
+  }
   const markdown = await analyzeAndGenerateWithAI(repo, readme, fileContents, contents, ai);
+  
+  if (progressCallback) {
+    await progressCallback('Documentation generated successfully');
+  }
 
   return { markdown, isCli: true };
 }
 
-function heuristicFileSelection(contents: RepoContents): string[] {
+async function heuristicFileSelection(
+  repo: GitHubRepo,
+  contents: RepoContents,
+  token: string | null
+): Promise<string[]> {
   const selected: string[] = [];
   const fileSet = new Set(contents.files);
 
@@ -82,10 +131,88 @@ function heuristicFileSelection(contents: RepoContents): string[] {
     }
   }
 
-  // Priority 2: CLI directories
-  const cliDirs = ['bin/', 'cmd/', 'cli/', 'src/bin/', 'src/cli/', 'src/cmd/'];
+  // Parse Cargo.toml for [[bin]] entries (Rust projects)
+  if (fileSet.has('Cargo.toml')) {
+    try {
+      const cargoContent = await fetchConfigFileContent(repo.owner, repo.repo, 'Cargo.toml', token);
+      if (cargoContent) {
+        // Look for [[bin]] sections with path = "..."
+        const binMatches = cargoContent.matchAll(/\[\[bin\]\][^\[]*?path\s*=\s*"([^"]+)"/gs);
+        for (const match of binMatches) {
+          const binPath = match[1];
+          // Convert path like "src/main.rs" or "crates/core/src/main.rs" to the actual file
+          if (fileSet.has(binPath) && !selected.includes(binPath)) {
+            selected.push(binPath);
+            console.log(`[Analyzer] Found bin entry in Cargo.toml: ${binPath}`);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[Analyzer] Error parsing Cargo.toml:', e);
+    }
+  }
+
+  // Priority 2: Language-specific CLI directories and patterns
+  // Go: cmd/ directories
   for (const file of contents.files) {
-    if (selected.length >= 20) break;
+    if (selected.length >= 25) break;
+    if (file.match(/cmd\/[^/]+\/main\.go$/) && !file.includes('_test')) {
+      if (!selected.includes(file)) {
+        selected.push(file);
+      }
+    }
+  }
+  
+  // Rust: src/main.rs, src/bin/, and workspace crates
+  for (const file of contents.files) {
+    if (selected.length >= 30) break;
+    // Standard src/main.rs
+    if ((file === 'src/main.rs' || file.endsWith('/src/main.rs')) && !file.includes('_test')) {
+      if (!selected.includes(file)) {
+        selected.push(file);
+      }
+    }
+  }
+  
+  // Rust: src/bin/ directory
+  for (const file of contents.files) {
+    if (selected.length >= 35) break;
+    if (file.match(/src\/bin\/.*\.rs$/) && !file.includes('_test')) {
+      if (!selected.includes(file)) {
+        selected.push(file);
+      }
+    }
+  }
+  
+  // Rust: workspace crates (e.g., crates/*/src/main.rs)
+  for (const file of contents.files) {
+    if (selected.length >= 40) break;
+    if (file.match(/crates\/[^/]+\/src\/main\.rs$/) && !file.includes('_test')) {
+      if (!selected.includes(file)) {
+        selected.push(file);
+      }
+    }
+  }
+
+  // C/C++: Look for main.c or files in src/bin/ directories
+  for (const file of contents.files) {
+    if (selected.length >= 45) break;
+    // Common C binary patterns
+    if ((file.match(/src\/bin\/[^/]+\/main\.(c|cpp)$/) ||
+         file.match(/src\/backend\/[^/]+\/main\.(c|cpp)$/) ||
+         file === 'src/main.c' ||
+         file.endsWith('/main.c')) &&
+        !file.includes('_test')) {
+      if (!selected.includes(file)) {
+        selected.push(file);
+      }
+    }
+  }
+
+  // General CLI directories
+  const cliDirs = ['bin/', 'cli/', 'src/cli/', 'src/cmd/'];
+  for (const file of contents.files) {
+    if (selected.length >= 35) break;
     for (const dir of cliDirs) {
       if (file.includes(dir) && !file.includes('test') && !file.includes('_test.')) {
         if (!selected.includes(file)) {
@@ -96,30 +223,39 @@ function heuristicFileSelection(contents: RepoContents): string[] {
     }
   }
 
-  // Priority 3: Main entry points
+  // Priority 3: Main entry points by language
   const entryPoints = [
-    'main.go', 'index.js', 'cli.ts', 'cli.js', 'main.rs', 'main.py',
-    'src/index.ts', 'src/index.js', 'src/main.ts', 'src/main.js',
-    'src/cli.ts', 'src/cli.js', 'lib/cli.rb'
+    // Go
+    'main.go', 'cmd/root.go', 
+    // Node.js
+    'index.js', 'cli.ts', 'cli.js',
+    // Rust  
+    'src/main.rs', 'main.rs',
+    // Python
+    '__main__.py', 'main.py', 'cli.py',
+    // C/C++
+    'main.c', 'main.cpp', 'src/main.c', 'src/main.cpp',
+    // Ruby
+    'bin/console', 'exe/console', 'lib/cli.rb'
   ];
   
   for (const file of entryPoints) {
-    if (selected.length >= 25) break;
+    if (selected.length >= 40) break;
     if (fileSet.has(file) && !selected.includes(file)) {
       selected.push(file);
     }
   }
 
   // Priority 4: Documentation files
-  const docFiles = ['README.md', 'CONTRIBUTING.md', 'docs/CLI.md', 'docs/cli.md'];
+  const docFiles = ['README.md', 'README.rst', 'CONTRIBUTING.md', 'docs/CLI.md', 'docs/cli.md'];
   for (const file of docFiles) {
-    if (selected.length >= 28) break;
+    if (selected.length >= 45) break;
     if (fileSet.has(file) && !selected.includes(file)) {
       selected.push(file);
     }
   }
 
-  return selected.slice(0, 30); // Max 30 files
+  return selected.slice(0, 50); // Max 50 files
 }
 
 async function fetchFiles(
@@ -179,10 +315,26 @@ async function analyzeAndGenerateWithAI(
   const messages = [
     {
       role: "system",
-      content: `You are a technical documentation expert specializing in CLI tools. 
+      content: `You are a technical documentation expert specializing in CLI tools.
 
 YOUR TASK:
 Analyze the provided repository files to determine if this is a CLI tool, extract CLI arguments/options, and generate documentation.
+
+LANGUAGE-SPECIFIC CLI DETECTION:
+For each language, prioritize and analyze these file patterns to find CLI entry points:
+- **Go**: Look for cmd/*/main.go, main.go, any file importing github.com/spf13/cobra, or files defining Command structs
+- **Rust**: Prioritize src/bin/**/*.rs, src/main.rs, check Cargo.toml for [[bin]] entries, look for clap/structopt imports
+- **C/C++**: Find files containing int main( or argc/argv parameters, especially in root or src/ directories
+- **Python**: Look for argparse, click, typer imports; check for if __name__ == "__main__": blocks
+- **Node.js**: Prioritize bin/*, cli.js, index.js in package.json bin field, files importing commander/yargs/meow
+- **Ruby**: Look for Thor, Clamp, or Commander usage in bin/ or exe/ directories
+
+EXPLICIT ENTRY POINT INSTRUCTIONS:
+CRITICAL: Your first priority is finding the CLI entry point:
+1. Look for the main() function or equivalent entry point in the files provided
+2. Find where command-line arguments are parsed (cobra.Command, argparse.ArgumentParser, etc.)
+3. Identify the file that defines available commands/subcommands
+4. If multiple binaries exist, document each one separately
 
 CRITICAL RULES:
 1. ONLY document what you can verify from the provided files - NEVER hallucinate or invent flags, options, or commands

@@ -1,7 +1,7 @@
 import { Env, GitHubRepo, CacheEntry } from './types';
 import { GitHubClient } from './github';
 import { Cache } from './cache';
-import { analyzeAndGenerateDocs } from './llm/analyzer';
+import { analyzeAndGenerateDocsWithStreaming } from './llm/analyzer';
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -63,45 +63,75 @@ export default {
       }
     }
     
-    // No cache or bypass - fetch from GitHub
-    const github = new GitHubClient(env.GITHUB_TOKEN || null);
-    
+    // No cache or bypass - fetch from GitHub with streaming
+    return handleStreamingGeneration(repoData, env, cache, skipCache);
+  }
+};
+
+async function handleStreamingGeneration(
+  repoData: GitHubRepo,
+  env: Env,
+  cache: Cache,
+  skipCache: boolean
+): Promise<Response> {
+  const { owner, repo } = repoData;
+  const github = new GitHubClient(env.GITHUB_TOKEN || null);
+  
+  // Create a TransformStream for streaming
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
+  
+  // Start the background work
+  const backgroundWork = async () => {
     try {
-      // Fetch both README and repo structure
+      // Send initial loading message
+      await writer.write(encoder.encode(`# Loading CLI documentation for ${owner}/${repo}...\n\n`));
+      
+      // Fetch repository data
+      await writer.write(encoder.encode(`> Fetching repository data...\n`));
       const [readme, repoContents] = await Promise.all([
         github.fetchReadme(repoData),
         github.fetchRepoContents(repoData)
       ]);
       
       if (!readme) {
+        const notFoundMarkdown = `# ${repo}\n\nRepository not found or has no README.`;
+        await writer.write(encoder.encode(`\n${notFoundMarkdown}`));
+        await writer.close();
+        
+        // Cache the not-found result
         const notFoundResponse: CacheEntry = {
-          markdown: `# ${repo}\n\nRepository not found or has no README.`,
+          markdown: notFoundMarkdown,
           isCli: false,
           generatedAt: new Date().toISOString(),
           source: 'github'
         };
-        
         await cache.set(owner, repo, notFoundResponse);
-        
-        return new Response(notFoundResponse.markdown, {
-          status: 404,
-          headers: {
-            'Content-Type': 'text/markdown; charset=utf-8',
-            'X-Cache': 'MISS',
-            'X-Generated-At': notFoundResponse.generatedAt
-          }
-        });
+        return;
       }
       
-      // Analyze repo and generate documentation
-      console.log(`[Main] Starting analysis for ${owner}/${repo}...`);
-      const { markdown, isCli } = await analyzeAndGenerateDocs(
+      // Analyze and generate docs with streaming progress
+      await writer.write(encoder.encode(`> Analyzing repository structure...\n`));
+      
+      const progressCallback = async (message: string) => {
+        await writer.write(encoder.encode(`> ${message}\n`));
+      };
+      
+      const { markdown, isCli } = await analyzeAndGenerateDocsWithStreaming(
         repoData,
         readme,
         repoContents,
         env.GITHUB_TOKEN || null,
-        env.AI
+        env.AI,
+        env,
+        progressCallback
       );
+      
+      // Send the final markdown
+      await writer.write(encoder.encode(`\n---\n\n`));
+      await writer.write(encoder.encode(markdown));
+      await writer.close();
       
       // Cache the result
       const cacheEntry: CacheEntry = {
@@ -110,37 +140,36 @@ export default {
         generatedAt: new Date().toISOString(),
         source: 'github'
       };
-      
       await cache.set(owner, repo, cacheEntry);
-      
-      return new Response(markdown, {
-        headers: {
-          'Content-Type': 'text/markdown; charset=utf-8',
-          'X-Cache': skipCache ? 'BYPASS' : 'MISS',
-          'X-Generated-At': cacheEntry.generatedAt,
-          'X-Is-Cli': String(isCli),
-          'X-Auth': env.GITHUB_TOKEN ? 'token' : 'none',
-          'Cache-Control': 'public, max-age=86400'
-        }
-      });
       
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error('[Main] Error:', error);
+      console.error('[Streaming] Error:', error);
       
-      return new Response(
-        `# Error\n\nFailed to fetch documentation for ${owner}/${repo}.\n\nError: ${errorMessage}\n\nPlease try again later.`,
-        {
-          status: 500,
-          headers: {
-            'Content-Type': 'text/markdown; charset=utf-8',
-            'X-Error': 'fetch-failed'
-          }
-        }
-      );
+      // Handle rate limit errors
+      if (errorMessage.startsWith('RATE_LIMIT_EXCEEDED:')) {
+        const resetTime = errorMessage.split(':')[1];
+        await writer.write(encoder.encode(`\n\n# Rate Limit Exceeded\n\nAI rate limit has been reached.\n\nThe limit resets at: ${new Date(resetTime).toLocaleString()}\n\nPlease try again after the reset time.`));
+      } else {
+        await writer.write(encoder.encode(`\n\n# Error\n\nFailed to fetch documentation for ${owner}/${repo}.\n\nError: ${errorMessage}\n\nPlease try again later.`));
+      }
+      await writer.close();
     }
-  }
-};
+  };
+  
+  // Start background work without awaiting
+  backgroundWork();
+  
+  // Return the streaming response immediately
+  return new Response(readable, {
+    headers: {
+      'Content-Type': 'text/markdown; charset=utf-8',
+      'X-Cache': skipCache ? 'BYPASS' : 'MISS',
+      'Transfer-Encoding': 'chunked',
+      'Cache-Control': 'no-cache'
+    }
+  });
+}
 
 async function handleCacheInvalidation(env: Env): Promise<Response> {
   try {
