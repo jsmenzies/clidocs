@@ -27,24 +27,29 @@ export async function verifyIsCliTool(
     ? readme.substring(0, 8000) + '\n\n[README truncated due to length...]'
     : readme;
   
-  const prompt = `Analyze this GitHub repository README and determine if it's primarily a CLI (command-line interface) tool.
+  const prompt = `You are an expert at identifying CLI tools from GitHub READMEs. 
 
-A CLI tool is a program designed to be run from the terminal/command line with commands like:
-- my-tool --help
-- npx my-tool
-- npm install -g my-tool
+Question: Is "${repo.owner}/${repo.repo}" primarily a CLI (command-line interface) tool?
 
-Look for indicators like:
-- Installation instructions mentioning global install (-g flag)
-- Usage examples showing terminal commands
-- CLI-specific options and flags (--help, --version, etc.)
-- "CLI", "command-line", "terminal", "shell" keywords
-- Binary/executable distribution
+A CLI tool is a program that users install and run from the terminal/command line with commands like:
+- tool-name --help
+- npx tool-name
+- npm install -g tool-name
+- tool-name command --option
 
-IMPORTANT: Respond with ONLY a JSON object in this exact format:
-{"isCli": true/false, "confidence": 0.0-1.0, "reasoning": "brief explanation"}
+IMPORTANT: Libraries/SDKs that developers import into code are NOT CLI tools. Only tools that end users run from the command line are CLI tools.
+
+Look for these CLI indicators in the README:
+- Global installation instructions (-g flag, npx, brew install, etc.)
+- Terminal/command line usage examples
+- Binary/executable files mentioned
+- Command descriptions and options
+- Keywords: CLI, command-line, terminal, binary, executable, "run from command line"
 
 Repository: ${repo.owner}/${repo.repo}
+
+Do you know this is a CLI tool? Answer with ONLY a JSON object:
+{"isCli": true/false, "confidence": 0.0-1.0, "reasoning": "brief explanation"}
 
 README:
 \`\`\`
