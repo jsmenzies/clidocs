@@ -46,8 +46,8 @@ ${truncatedReadme}
 Generate the complete CLI documentation in markdown format:`;
 
   try {
-    // Call Cloudflare AI with Llama 3.3 70B (larger, more capable model)
-    const response = await ai.run('@cf/meta/llama-3.3-70b-instruct', {
+    // Call Cloudflare AI with Llama 3.3 70B fast quantized model
+    const response = await ai.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
       prompt: prompt,
       max_tokens: 2048,
       temperature: 0.3
