@@ -100,7 +100,7 @@ export default {
       } else {
         // Not a CLI tool - return message
         markdown = `# ${repo}\n\nSource: github.com/${owner}/${repo}\n\nThis repository does not appear to be a CLI tool.\n\nConfidence: ${(verification.confidence * 100).toFixed(0)}%\n\n---\n\n*Detected by clidocs.io*  
-*Note: This is mock data. Connect LLMs for real detection.*`;
+*AI Model: Llama 3.1 8B via Cloudflare Workers AI.*`;
         isCli = false;
       }
       
