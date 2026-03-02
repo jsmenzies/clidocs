@@ -21,29 +21,36 @@ export async function generateCliDocs(
     ? readme.substring(0, 8000) + '\n\n[README truncated...]'
     : readme;
 
-  const prompt = `You are a technical documentation expert. Analyze this GitHub repository README and generate comprehensive CLI documentation.
+  const prompt = `You are a technical documentation expert. Analyze this GitHub repository README and generate CLI-only documentation.
+
+IMPORTANT: Focus ONLY on command-line interface usage. DO NOT include:
+- Programming examples
+- API usage
+- Code integration examples
+- Import statements
+- JavaScript/TypeScript/Python code for using the library
 
 Extract and format the following sections:
 
-1. **Installation** - All installation methods (npm, yarn, cargo, pip, etc.)
-2. **Command Reference** - Complete list of commands with descriptions and options
-3. **Examples** - Practical usage examples
-4. **Configuration** - Configuration files, environment variables, and options
+1. **Installation** - CLI installation methods ONLY (global installs with -g flag, npx, cargo install, brew install, etc.)
+2. **Command Reference** - All CLI commands with descriptions, arguments, and flags/options
+3. **CLI Examples** - Command-line usage examples ONLY (terminal commands, not code)
+4. **CLI Configuration** - Config files, environment variables, and CLI-specific options (NOT programming config)
 
 Format the output as clean markdown with:
-- Clear headings and subheadings
-- Code blocks for commands
-- Tables for options/flags when applicable
-- Bullet points for lists
+- Clear headings
+- Code blocks showing terminal commands only
+- Tables for command options/flags
+- Bullet points for command lists
 
 Repository: ${repo.owner}/${repo.repo}
 
 README:
-\`\`\`
+\`\`
 ${truncatedReadme}
-\`\`\`
+\`\`
 
-Generate the complete CLI documentation in markdown format:`;
+Generate CLI-only documentation in markdown format:`;
 
   try {
     // Call Cloudflare AI with Llama 3.1 8B fast model
