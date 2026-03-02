@@ -10,5 +10,5 @@ id = "dd332d8dc6b44c21bf0e715a6b68c294"
 # Add your GitHub token here or use wrangler secret
 # GITHUB_TOKEN = ""
 
-# [[ai]]
-# binding = "AI"
+[[ai]]
+binding = "AI"
