@@ -53,6 +53,7 @@ export default {
             'X-Cache': 'HIT',
             'X-Generated-At': cached.generatedAt,
             'X-Is-Cli': String(cached.isCli),
+            'X-Auth': env.GITHUB_TOKEN ? 'token' : 'none',
             'Cache-Control': 'public, max-age=86400'
           }
         });
@@ -60,7 +61,8 @@ export default {
     }
     
     // No cache or bypass - fetch from GitHub
-    const github = new GitHubClient(env.GITHUB_TOKEN);
+    // Token is optional - works without auth but has lower rate limits (60 req/hour)
+    const github = new GitHubClient(env.GITHUB_TOKEN || null);
     
     try {
       const readme = await github.fetchReadme(repoData);
@@ -118,6 +120,7 @@ export default {
           'X-Cache': skipCache ? 'BYPASS' : 'MISS',
           'X-Generated-At': cacheEntry.generatedAt,
           'X-Is-Cli': String(isCli),
+          'X-Auth': env.GITHUB_TOKEN ? 'token' : 'none',
           'Cache-Control': 'public, max-age=86400'
         }
       });
