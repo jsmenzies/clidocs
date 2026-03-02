@@ -6,7 +6,6 @@ import { GitHubRepo } from '../types';
 interface AiVerificationResponse {
   isCli: boolean;
   confidence: number;
-  reasoning?: string;
 }
 
 export async function verifyIsCliTool(
@@ -49,7 +48,7 @@ Look for these CLI indicators in the README:
 Repository: ${repo.owner}/${repo.repo}
 
 Do you know this is a CLI tool? Answer with ONLY a JSON object:
-{"isCli": true/false, "confidence": 0.0-1.0, "reasoning": "brief explanation"}
+{"isCli": true/false, "confidence": 0.0-1.0}
 
 README:
 \`\`\`
