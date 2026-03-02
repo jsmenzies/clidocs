@@ -30,9 +30,9 @@ export async function verifyIsCliTool(
   const prompt = `Analyze this GitHub repository README and determine if it's primarily a CLI (command-line interface) tool.
 
 A CLI tool is a program designed to be run from the terminal/command line with commands like:
-- `my-tool --help`
-- `npx my-tool`
-- `npm install -g my-tool`
+- my-tool --help
+- npx my-tool
+- npm install -g my-tool
 
 Look for indicators like:
 - Installation instructions mentioning global install (-g flag)
@@ -47,7 +47,9 @@ IMPORTANT: Respond with ONLY a JSON object in this exact format:
 Repository: ${repo.owner}/${repo.repo}
 
 README:
-${'```'}${truncatedReadme}${'```'}
+\`\`\`
+${truncatedReadme}
+\`\`\`
 
 JSON response:`;
 
