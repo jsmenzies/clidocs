@@ -11,6 +11,6 @@ clidocs.io/owner/repo
 ```
 
 Examples:
-- `clidocs.io/vercel/next` - Next.js CLI
-- `clidocs.io/vitejs/vite` - Vite
-- `clidocs.io/pnpm/pnpm` - pnpm package manager
+- [clidocs.io/vercel/next](https://clidocs.io/vercel/next) - Next.js CLI
+- [clidocs.io/vitejs/vite](https://clidocs.io/vitejs/vite) - Vite
+- [clidocs.io/pnpm/pnpm](https://clidocs.io/pnpm/pnpm) - pnpm package manager
