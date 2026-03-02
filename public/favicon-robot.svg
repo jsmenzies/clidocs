@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Robot head -->
+  <rect x="20" y="25" width="60" height="50" rx="8" fill="#6366f1"/>
+  
+  <!-- Screen/face -->
+  <rect x="28" y="35" width="44" height="30" rx="4" fill="#1e1e2e"/>
+  
+  <!-- Terminal prompt -->
+  <text x="33" y="52" font-family="monospace" font-size="12" fill="#10b981">&gt;_</text>
+  
+  <!-- Eyes (code brackets) -->
+  <text x="55" y="52" font-family="monospace" font-size="10" fill="#fbbf24">{}</text>
+  
+  <!-- Antenna -->
+  <line x1="50" y1="25" x2="50" y2="15" stroke="#6366f1" stroke-width="3"/>
+  <circle cx="50" cy="12" r="4" fill="#10b981"/>
+  
+  <!-- Neck -->
+  <rect x="45" y="75" width="10" height="8" fill="#6366f1"/>
+</svg>

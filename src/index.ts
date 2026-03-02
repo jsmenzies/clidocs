@@ -3,18 +3,44 @@ import { GitHubClient } from './github';
 import { Cache } from './cache';
 import { analyzeAndGenerateDocsWithStreaming } from './llm/analyzer';
 
+const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" rx="16" fill="#1e1e2e"/>
+  <rect x="10" y="20" width="80" height="60" rx="6" fill="#313244"/>
+  <circle cx="22" cy="32" r="3" fill="#f38ba8"/>
+  <circle cx="32" cy="32" r="3" fill="#f9e2af"/>
+  <circle cx="42" cy="32" r="3" fill="#a6e3a1"/>
+  <text x="18" y="52" font-family="monospace" font-size="16" fill="#94e2d5">$</text>
+  <text x="30" y="52" font-family="monospace" font-size="14" fill="#cdd6f4">clidocs</text>
+  <rect x="82" y="42" width="2" height="14" fill="#cdd6f4">
+    <animate attributeName="opacity" values="1;0;1" dur="1s" repeatCount="indefinite"/>
+  </rect>
+  <text x="50" y="82" font-family="monospace" font-size="8" fill="#89b4fa" text-anchor="middle">CLI DOCS</text>
+</svg>`;
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-    const path = url.pathname.slice(1); // Remove leading slash
+    const path = url.pathname;
+    
+    // Handle favicon requests
+    if (path === '/favicon.ico' || path === '/favicon.svg') {
+      return new Response(FAVICON_SVG, {
+        headers: {
+          'Content-Type': 'image/svg+xml',
+          'Cache-Control': 'public, max-age=86400'
+        }
+      });
+    }
+    
+    const pathWithoutSlash = path.slice(1); // Remove leading slash
     
     // Handle cache invalidation endpoint
-    if (path === 'admin/invalidate-cache' && request.method === 'POST') {
+    if (pathWithoutSlash === 'admin/invalidate-cache' && request.method === 'POST') {
       return handleCacheInvalidation(env);
     }
     
     // Parse owner/repo from path
-    const parts = path.split('/');
+    const parts = pathWithoutSlash.split('/');
     if (parts.length !== 2) {
       return new Response(
         `# Error\n\nInvalid URL format. Use: clidocs.io/owner/repo\n\nExample: clidocs.io/tj/commander.js`,

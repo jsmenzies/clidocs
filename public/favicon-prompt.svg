@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Background circle -->
+  <circle cx="50" cy="50" r="45" fill="#6366f1"/>
+  
+  <!-- Greater than symbol -->
+  <path d="M35 30 L65 50 L35 70" stroke="#ffffff" stroke-width="8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Underscore -->
+  <line x1="40" y1="72" x2="60" y2="72" stroke="#10b981" stroke-width="6" stroke-linecap="round">
+    <animate attributeName="opacity" values="1;0.3;1" dur="1.2s" repeatCount="indefinite"/>
+  </line>
+</svg>
