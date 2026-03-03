@@ -1,6 +1,53 @@
-import { Env, GitHubRepo, RepoContents } from '../types';
-import { fetchConfigFileContent } from './cliFileAnalysis';
+import { Env, GitHubRepo, RepoContents, AIBinding } from '../types';
 import { checkRateLimit } from '../rateLimiter';
+
+// Parallel map utility with concurrency limit
+async function pMap<T, R>(
+  items: T[],
+  mapper: (item: T) => Promise<R>,
+  options: { concurrency: number }
+): Promise<R[]> {
+  const results: R[] = [];
+  const { concurrency } = options;
+
+  for (let i = 0; i < items.length; i += concurrency) {
+    const batch = items.slice(i, i + concurrency);
+    const batchResults = await Promise.all(batch.map(mapper));
+    results.push(...batchResults);
+  }
+
+  return results;
+}
+
+// Helper to fetch file content from GitHub
+async function fetchConfigFileContent(
+  owner: string,
+  repo: string,
+  filePath: string,
+  token: string | null,
+  timeoutMs: number = 10000
+): Promise<string | null> {
+  const url = `https://raw.githubusercontent.com/${owner}/${repo}/HEAD/${filePath}`;
+
+  const headers: Record<string, string> = {
+    'User-Agent': 'clidocs/0.1.0'
+  };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  try {
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+    if (response.ok) {
+      return await response.text();
+    }
+  } catch (error) {
+    console.error(`Error fetching ${filePath}:`, error);
+  }
+
+  return null;
+}
 
 interface CliFileContent {
   path: string;
@@ -12,7 +59,7 @@ export async function analyzeAndGenerateDocs(
   readme: string,
   contents: RepoContents,
   token: string | null,
-  ai?: any,
+  ai?: AIBinding,
   env?: Env
 ): Promise<{ markdown: string; isCli: boolean }> {
   return analyzeAndGenerateDocsWithStreaming(repo, readme, contents, token, ai, env);
@@ -23,7 +70,7 @@ export async function analyzeAndGenerateDocsWithStreaming(
   readme: string,
   contents: RepoContents,
   token: string | null,
-  ai?: any,
+  ai?: AIBinding,
   env?: Env,
   progressCallback?: (message: string) => Promise<void>
 ): Promise<{ markdown: string; isCli: boolean }> {
@@ -48,12 +95,20 @@ export async function analyzeAndGenerateDocsWithStreaming(
     console.log(`[Analyzer] Rate limit check passed. Remaining: ${rateLimit.remaining}`);
   }
 
+  // Get config values with defaults
+  const maxFilesToAnalyze = env?.MAX_FILES_TO_ANALYZE ? parseInt(env.MAX_FILES_TO_ANALYZE, 10) : 50;
+  const maxFileContentSize = env?.MAX_FILE_CONTENT_SIZE ? parseInt(env.MAX_FILE_CONTENT_SIZE, 10) : 10000;
+  const maxReadmeSize = env?.MAX_README_SIZE ? parseInt(env.MAX_README_SIZE, 10) : 5000;
+  const aiMaxTokens = env?.AI_MAX_TOKENS ? parseInt(env.AI_MAX_TOKENS, 10) : 4000;
+  const aiTemperature = env?.AI_TEMPERATURE ? parseFloat(env.AI_TEMPERATURE) : 0.2;
+  const rawGithubTimeoutMs = env?.GITHUB_TIMEOUT_MS ? parseInt(env.GITHUB_TIMEOUT_MS, 10) : 10000;
+
   // Step 1: Use heuristic to pre-select likely CLI files (no AI)
   console.log('[Analyzer] Pre-selecting CLI files...');
   if (progressCallback) {
     await progressCallback('Identifying CLI-related files...');
   }
-  const preselectedFiles = await heuristicFileSelection(repo, contents, token);
+  const preselectedFiles = await heuristicFileSelection(repo, contents, token, maxFilesToAnalyze, rawGithubTimeoutMs);
   console.log(`[Analyzer] Pre-selected ${preselectedFiles.length} files`);
 
   if (progressCallback) {
@@ -73,7 +128,7 @@ export async function analyzeAndGenerateDocsWithStreaming(
   if (progressCallback) {
     await progressCallback('Fetching file contents...');
   }
-  const fileContents = await fetchFiles(repo, preselectedFiles, token);
+  const fileContents = await fetchFiles(repo, preselectedFiles, token, maxFileContentSize, rawGithubTimeoutMs);
 
   if (progressCallback) {
     await progressCallback(`Fetched ${fileContents.length} files`);
@@ -94,7 +149,7 @@ export async function analyzeAndGenerateDocsWithStreaming(
   if (progressCallback) {
     await progressCallback('Generating documentation with AI...');
   }
-  const markdown = await analyzeAndGenerateWithAI(repo, readme, fileContents, contents, ai);
+  const markdown = await analyzeAndGenerateWithAI(repo, readme, fileContents, contents, ai, env, maxReadmeSize, aiMaxTokens, aiTemperature);
   
   if (progressCallback) {
     await progressCallback('Documentation generated successfully');
@@ -106,10 +161,22 @@ export async function analyzeAndGenerateDocsWithStreaming(
 async function heuristicFileSelection(
   repo: GitHubRepo,
   contents: RepoContents,
-  token: string | null
+  token: string | null,
+  maxFiles: number = 50,
+  rawGithubTimeoutMs: number = 10000
 ): Promise<string[]> {
-  const selected: string[] = [];
+  const selected = new Set<string>();
   const fileSet = new Set(contents.files);
+
+  // Helper to add files up to a limit
+  const addFiles = (files: string[], limit: number) => {
+    for (const file of files) {
+      if (selected.size >= limit) break;
+      if (!file.includes('_test') && !file.includes('test')) {
+        selected.add(file);
+      }
+    }
+  };
 
   // Priority 1: Config files with CLI metadata
   const configFiles = [
@@ -119,30 +186,25 @@ async function heuristicFileSelection(
   
   for (const pattern of configFiles) {
     if (pattern.includes('*')) {
-      // Handle wildcard patterns
       const regex = new RegExp(pattern.replace('*', '.*'));
       for (const file of contents.files) {
-        if (regex.test(file) && !selected.includes(file)) {
-          selected.push(file);
-        }
+        if (regex.test(file)) selected.add(file);
       }
-    } else if (fileSet.has(pattern) && !selected.includes(pattern)) {
-      selected.push(pattern);
+    } else if (fileSet.has(pattern)) {
+      selected.add(pattern);
     }
   }
 
   // Parse Cargo.toml for [[bin]] entries (Rust projects)
   if (fileSet.has('Cargo.toml')) {
     try {
-      const cargoContent = await fetchConfigFileContent(repo.owner, repo.repo, 'Cargo.toml', token);
+      const cargoContent = await fetchConfigFileContent(repo.owner, repo.repo, 'Cargo.toml', token, rawGithubTimeoutMs);
       if (cargoContent) {
-        // Look for [[bin]] sections with path = "..."
         const binMatches = cargoContent.matchAll(/\[\[bin\]\][^\[]*?path\s*=\s*"([^"]+)"/gs);
         for (const match of binMatches) {
           const binPath = match[1];
-          // Convert path like "src/main.rs" or "crates/core/src/main.rs" to the actual file
-          if (fileSet.has(binPath) && !selected.includes(binPath)) {
-            selected.push(binPath);
+          if (fileSet.has(binPath)) {
+            selected.add(binPath);
             console.log(`[Analyzer] Found bin entry in Cargo.toml: ${binPath}`);
           }
         }
@@ -153,132 +215,72 @@ async function heuristicFileSelection(
   }
 
   // Priority 2: Language-specific CLI directories and patterns
-  // Go: cmd/ directories
-  for (const file of contents.files) {
-    if (selected.length >= 25) break;
-    if (file.match(/cmd\/[^/]+\/main\.go$/) && !file.includes('_test')) {
-      if (!selected.includes(file)) {
-        selected.push(file);
-      }
-    }
-  }
-  
-  // Rust: src/main.rs, src/bin/, and workspace crates
-  for (const file of contents.files) {
-    if (selected.length >= 30) break;
-    // Standard src/main.rs
-    if ((file === 'src/main.rs' || file.endsWith('/src/main.rs')) && !file.includes('_test')) {
-      if (!selected.includes(file)) {
-        selected.push(file);
-      }
-    }
-  }
-  
-  // Rust: src/bin/ directory
-  for (const file of contents.files) {
-    if (selected.length >= 35) break;
-    if (file.match(/src\/bin\/.*\.rs$/) && !file.includes('_test')) {
-      if (!selected.includes(file)) {
-        selected.push(file);
-      }
-    }
-  }
-  
-  // Rust: workspace crates (e.g., crates/*/src/main.rs)
-  for (const file of contents.files) {
-    if (selected.length >= 40) break;
-    if (file.match(/crates\/[^/]+\/src\/main\.rs$/) && !file.includes('_test')) {
-      if (!selected.includes(file)) {
-        selected.push(file);
-      }
-    }
-  }
+  const cliPatterns = [
+    { pattern: /cmd\/[^/]+\/main\.go$/, limit: 25 },
+    { pattern: /^(src\/main\.rs|.*\/src\/main\.rs)$/, limit: 30 },
+    { pattern: /src\/bin\/.*\.rs$/, limit: 35 },
+    { pattern: /crates\/[^/]+\/src\/main\.rs$/, limit: 40 },
+    { pattern: /src\/bin\/[^/]+\/main\.(c|cpp)$|src\/backend\/[^/]+\/main\.(c|cpp)$|^src\/main\.c$|\/main\.c$/, limit: 45 },
+  ];
 
-  // C/C++: Look for main.c or files in src/bin/ directories
-  for (const file of contents.files) {
-    if (selected.length >= 45) break;
-    // Common C binary patterns
-    if ((file.match(/src\/bin\/[^/]+\/main\.(c|cpp)$/) ||
-         file.match(/src\/backend\/[^/]+\/main\.(c|cpp)$/) ||
-         file === 'src/main.c' ||
-         file.endsWith('/main.c')) &&
-        !file.includes('_test')) {
-      if (!selected.includes(file)) {
-        selected.push(file);
-      }
-    }
+  for (const { pattern, limit } of cliPatterns) {
+    const matches = contents.files.filter(f => pattern.test(f));
+    addFiles(matches, limit);
   }
 
   // General CLI directories
   const cliDirs = ['bin/', 'cli/', 'src/cli/', 'src/cmd/'];
-  for (const file of contents.files) {
-    if (selected.length >= 35) break;
-    for (const dir of cliDirs) {
-      if (file.includes(dir) && !file.includes('test') && !file.includes('_test.')) {
-        if (!selected.includes(file)) {
-          selected.push(file);
-        }
-        break;
-      }
-    }
-  }
+  const cliDirFiles = contents.files.filter(f => 
+    cliDirs.some(dir => f.includes(dir)) && !f.includes('test') && !f.includes('_test.')
+  );
+  addFiles(cliDirFiles, 35);
 
   // Priority 3: Main entry points by language
   const entryPoints = [
-    // Go
-    'main.go', 'cmd/root.go', 
-    // Node.js
-    'index.js', 'cli.ts', 'cli.js',
-    // Rust  
-    'src/main.rs', 'main.rs',
-    // Python
-    '__main__.py', 'main.py', 'cli.py',
-    // C/C++
+    'main.go', 'cmd/root.go', 'index.js', 'cli.ts', 'cli.js',
+    'src/main.rs', 'main.rs', '__main__.py', 'main.py', 'cli.py',
     'main.c', 'main.cpp', 'src/main.c', 'src/main.cpp',
-    // Ruby
     'bin/console', 'exe/console', 'lib/cli.rb'
   ];
   
   for (const file of entryPoints) {
-    if (selected.length >= 40) break;
-    if (fileSet.has(file) && !selected.includes(file)) {
-      selected.push(file);
-    }
+    if (selected.size >= 40) break;
+    if (fileSet.has(file)) selected.add(file);
   }
 
   // Priority 4: Documentation files
   const docFiles = ['README.md', 'README.rst', 'CONTRIBUTING.md', 'docs/CLI.md', 'docs/cli.md'];
   for (const file of docFiles) {
-    if (selected.length >= 45) break;
-    if (fileSet.has(file) && !selected.includes(file)) {
-      selected.push(file);
-    }
+    if (selected.size >= 45) break;
+    if (fileSet.has(file)) selected.add(file);
   }
 
-  return selected.slice(0, 50); // Max 50 files
+  return Array.from(selected).slice(0, maxFiles);
 }
 
 async function fetchFiles(
   repo: GitHubRepo,
   filePaths: string[],
-  token: string | null
+  token: string | null,
+  maxSize: number = 10000,
+  timeoutMs: number = 10000
 ): Promise<CliFileContent[]> {
-  const contents: CliFileContent[] = [];
-
-  for (const filePath of filePaths) {
-    const content = await fetchConfigFileContent(repo.owner, repo.repo, filePath, token);
-    if (content) {
-      // Truncate very large files
-      const maxSize = 10000;
+  const results = await pMap(
+    filePaths,
+    async (filePath) => {
+      const content = await fetchConfigFileContent(repo.owner, repo.repo, filePath, token, timeoutMs);
+      if (!content) return null;
+      
       const truncated = content.length > maxSize 
         ? content.substring(0, maxSize) + '\n\n[File truncated...]'
         : content;
       
-      contents.push({ path: filePath, content: truncated });
-    }
-  }
+      return { path: filePath, content: truncated };
+    },
+    { concurrency: 10 }
+  );
 
-  return contents;
+  return results.filter((r): r is CliFileContent => r !== null);
 }
 
 async function analyzeAndGenerateWithAI(
@@ -286,7 +288,11 @@ async function analyzeAndGenerateWithAI(
   readme: string,
   fileContents: CliFileContent[],
   allContents: RepoContents,
-  ai: any
+  ai: AIBinding,
+  env: Env | undefined,
+  maxReadmeSize: number = 5000,
+  maxTokens: number = 4000,
+  temperature: number = 0.2
 ): Promise<string> {
   // Build file context
   const fileContext = fileContents.map(file => {
@@ -308,8 +314,8 @@ async function analyzeAndGenerateWithAI(
     : '';
 
   // Truncate readme
-  const readmeContext = readme.length > 5000 
-    ? readme.substring(0, 5000) + '\n\n[README truncated...]'
+  const readmeContext = readme.length > maxReadmeSize 
+    ? readme.substring(0, maxReadmeSize) + '\n\n[README truncated...]'
     : readme;
 
   const messages = [
@@ -381,8 +387,8 @@ Generate documentation following the format in your instructions. Be explicit ab
   try {
     const response = await ai.run('@cf/zai-org/glm-4.7-flash', {
       messages,
-      max_tokens: 4000,
-      temperature: 0.2
+      max_tokens: maxTokens,
+      temperature: temperature
     });
 
     const generatedContent = response?.choices?.[0]?.message?.content || '';

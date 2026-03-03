@@ -3,6 +3,29 @@ import { GitHubClient } from './github';
 import { Cache } from './cache';
 import { analyzeAndGenerateDocsWithStreaming } from './llm/analyzer';
 
+// Analytics tracking helper
+function trackRepoView(
+  env: Env,
+  owner: string,
+  repo: string,
+  cacheStatus: 'HIT' | 'MISS' | 'BYPASS' | 'ERROR',
+  resultStatus: 'success' | 'error' | 'not_found' | 'rate_limited',
+  generationTimeMs: number = 0,
+  filesAnalyzed: number = 0
+): void {
+  if (!env.ANALYTICS) return;
+  
+  try {
+    env.ANALYTICS.writeDataPoint({
+      blobs: [owner, repo, cacheStatus, resultStatus],
+      doubles: [1, generationTimeMs, filesAnalyzed],
+      indexes: [`${owner}/${repo}`, new Date().toISOString().slice(0, 10)]
+    });
+  } catch (e) {
+    console.error('[Analytics] Failed to track:', e);
+  }
+}
+
 const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <!-- Background circle -->
   <circle cx="50" cy="50" r="45" fill="#6366f1"/>
@@ -88,6 +111,8 @@ export default {
     if (!skipCache) {
       const cached = await cache.get(owner, repo);
       if (cached) {
+        // Track cache hit
+        trackRepoView(env, owner, repo, 'HIT', 'success');
         return new Response(cached.markdown, {
           headers: {
             'Content-Type': 'text/markdown; charset=utf-8',
@@ -114,12 +139,17 @@ async function handleStreamingGeneration(
   ctx: ExecutionContext
 ): Promise<Response> {
   const { owner, repo } = repoData;
-  const github = new GitHubClient(env.GITHUB_TOKEN || null);
+  const githubTimeout = env.GITHUB_TIMEOUT_MS ? parseInt(env.GITHUB_TIMEOUT_MS, 10) : 10000;
+  const github = new GitHubClient(env.GITHUB_TOKEN || null, githubTimeout);
   
   // Create a TransformStream for streaming
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
   const encoder = new TextEncoder();
+  
+  // Track generation start time
+  const generationStartTime = Date.now();
+  let filesAnalyzed = 0;
   
   // Start the background work
   const backgroundWork = async () => {
@@ -145,6 +175,9 @@ async function handleStreamingGeneration(
         const notFoundMarkdown = `# ${repo}\n\nRepository not found or has no README.\n\nThis usually means:\n- The repository doesn't exist\n- The repository has no README file\n- GitHub API rate limit exceeded (60 requests/hour without token)`;
         await writer.write(encoder.encode(`\n${notFoundMarkdown}`));
         await writer.close();
+        
+        // Track not found
+        trackRepoView(env, owner, repo, skipCache ? 'BYPASS' : 'MISS', 'not_found');
         
         // Cache the not-found result
         const notFoundResponse: CacheEntry = {
@@ -174,6 +207,12 @@ async function handleStreamingGeneration(
         progressCallback
       );
       
+      // Track files analyzed (estimate from repoContents)
+      filesAnalyzed = repoContents.files.filter(f => 
+        f.includes('cmd/') || f.includes('cli/') || f.includes('bin/') ||
+        f === 'package.json' || f === 'Cargo.toml' || f.endsWith('.md')
+      ).length;
+      
       // Send the final markdown
       await writer.write(encoder.encode(`\n---\n\n`));
       await writer.write(encoder.encode(markdown));
@@ -188,18 +227,29 @@ async function handleStreamingGeneration(
       };
       await cache.set(owner, repo, cacheEntry);
       
+      // Track successful generation
+      const generationTimeMs = Date.now() - generationStartTime;
+      trackRepoView(env, owner, repo, skipCache ? 'BYPASS' : 'MISS', 'success', generationTimeMs, filesAnalyzed);
+      
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       console.error('[Streaming] Error:', error);
       
+      // Determine error type for tracking
+      let resultStatus: 'error' | 'rate_limited' = 'error';
+      
       // Handle rate limit errors
       if (errorMessage.startsWith('RATE_LIMIT_EXCEEDED:')) {
+        resultStatus = 'rate_limited';
         const resetTime = errorMessage.split(':')[1];
         await writer.write(encoder.encode(`\n\n# Rate Limit Exceeded\n\nAI rate limit has been reached.\n\nThe limit resets at: ${new Date(resetTime).toLocaleString()}\n\nPlease try again after the reset time.`));
       } else {
         await writer.write(encoder.encode(`\n\n# Error\n\nFailed to fetch documentation for ${owner}/${repo}.\n\nError: ${errorMessage}\n\nPlease try again later.`));
       }
       await writer.close();
+      
+      // Track error
+      trackRepoView(env, owner, repo, skipCache ? 'BYPASS' : 'MISS', resultStatus);
     }
   };
   

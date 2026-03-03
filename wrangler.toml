@@ -12,11 +12,30 @@ id = "dd332d8dc6b44c21bf0e715a6b68c294"
 AI_RATE_LIMIT = "100"           # Max AI calls per window
 AI_RATE_WINDOW = "3600"         # Window in seconds (1 hour = 3600)
 
+# Cache settings
+CACHE_TTL = "2592000"           # Cache TTL in seconds (30 days = 30 * 24 * 60 * 60)
+
+# Analysis limits
+MAX_FILES_TO_ANALYZE = "50"     # Maximum number of files to analyze per repo
+MAX_FILE_CONTENT_SIZE = "10000" # Maximum characters to read from each file (truncates if larger)
+MAX_README_SIZE = "5000"        # Maximum characters to read from README (truncates if larger)
+
+# AI configuration
+AI_MAX_TOKENS = "4000"          # Maximum tokens for AI response
+AI_TEMPERATURE = "0.2"          # AI temperature (0.0 = deterministic, 1.0 = creative)
+
+# Timeouts (milliseconds)
+GITHUB_TIMEOUT_MS = "10000"     # Timeout for all GitHub API and raw content requests (10 seconds)
+
 # Note: ADMIN_API_KEY should be set as a secret using:
 # wrangler secret put ADMIN_API_KEY
 
 [ai]
 binding = "AI"
+
+[[analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "clidocs_analytics"
 
 [[routes]]
 pattern = "clidocs.io"
