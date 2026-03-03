@@ -42,12 +42,7 @@ export default {
     }
     
     const pathWithoutSlash = path.slice(1); // Remove leading slash
-    
-    // Handle cache invalidation endpoint (requires API key authentication)
-    if (pathWithoutSlash === 'admin/invalidate-cache' && request.method === 'POST') {
-      return handleCacheInvalidation(request, env);
-    }
-    
+
     // Parse owner/repo from path
     const parts = pathWithoutSlash.split('/');
     if (parts.length !== 2) {
@@ -77,7 +72,15 @@ export default {
     
     const repoData: GitHubRepo = { owner, repo };
     const skipCache = url.searchParams.has('nocache') || url.searchParams.has('refresh');
-    
+
+    // Require authentication for cache bypass
+    if (skipCache) {
+      const authResult = validateApiKey(request, env);
+      if (!authResult.valid) {
+        return authResult.response!;
+      }
+    }
+
     // Initialize cache
     const cache = new Cache(env);
     
@@ -214,90 +217,48 @@ async function handleStreamingGeneration(
   });
 }
 
-async function handleCacheInvalidation(request: Request, env: Env): Promise<Response> {
-  // Verify API key authentication
+// Helper function to validate API key authentication
+function validateApiKey(request: Request, env: Env): { valid: boolean; response?: Response } {
   const authHeader = request.headers.get('Authorization');
   const expectedApiKey = env.ADMIN_API_KEY;
-  
+
   if (!authHeader || !authHeader.startsWith('Bearer ') || !expectedApiKey) {
-    return new Response(
-      JSON.stringify({ 
-        success: false, 
-        error: 'Unauthorized - API key required' 
-      }),
-      {
-        status: 401,
-        headers: {
-          'Content-Type': 'application/json',
-          'WWW-Authenticate': 'Bearer'
+    return {
+      valid: false,
+      response: new Response(
+        JSON.stringify({
+          success: false,
+          error: 'Unauthorized - API key required'
+        }),
+        {
+          status: 401,
+          headers: {
+            'Content-Type': 'application/json',
+            'WWW-Authenticate': 'Bearer'
+          }
         }
-      }
-    );
+      )
+    };
   }
-  
+
   const providedApiKey = authHeader.slice(7); // Remove 'Bearer ' prefix
   if (providedApiKey !== expectedApiKey) {
-    return new Response(
-      JSON.stringify({ 
-        success: false, 
-        error: 'Unauthorized - Invalid API key' 
-      }),
-      {
-        status: 401,
-        headers: {
-          'Content-Type': 'application/json'
+    return {
+      valid: false,
+      response: new Response(
+        JSON.stringify({
+          success: false,
+          error: 'Unauthorized - Invalid API key'
+        }),
+        {
+          status: 401,
+          headers: {
+            'Content-Type': 'application/json'
+          }
         }
-      }
-    );
+      )
+    };
   }
-  try {
-    // Get all keys from KV
-    const keys: string[] = [];
-    let cursor: string | undefined;
-    
-    // Cloudflare KV list returns paginated results
-    do {
-      const listResult = await env.CLIDOCS_CACHE.list({ cursor, limit: 1000 });
-      keys.push(...listResult.keys.map(k => k.name));
-      cursor = listResult.list_complete ? undefined : listResult.cursor;
-    } while (cursor);
-    
-    console.log(`[Admin] Found ${keys.length} cache entries to invalidate`);
-    
-    // Delete all keys
-    const deletePromises = keys.map(key => env.CLIDOCS_CACHE.delete(key));
-    await Promise.all(deletePromises);
-    
-    console.log(`[Admin] Successfully invalidated ${keys.length} cache entries`);
-    
-    return new Response(
-      JSON.stringify({ 
-        success: true, 
-        message: `Invalidated ${keys.length} cache entries`,
-        timestamp: new Date().toISOString()
-      }),
-      {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('[Admin] Cache invalidation failed:', error);
-    
-    return new Response(
-      JSON.stringify({ 
-        success: false, 
-        error: errorMessage 
-      }),
-      {
-        status: 500,
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-  }
+
+  return { valid: true };
 }
