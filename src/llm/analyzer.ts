@@ -1,5 +1,7 @@
 import { Env, GitHubRepo, RepoContents, AIBinding } from '../types';
 import { checkRateLimit } from '../rateLimiter';
+import { createLogger, Logger } from '../utils/logger';
+
 
 // Parallel map utility with concurrency limit
 async function pMap<T, R>(
@@ -25,7 +27,8 @@ async function fetchConfigFileContent(
   repo: string,
   filePath: string,
   token: string | null,
-  timeoutMs: number = 10000
+  timeoutMs: number = 10000,
+  log?: Logger
 ): Promise<string | null> {
   const url = `https://raw.githubusercontent.com/${owner}/${repo}/HEAD/${filePath}`;
 
@@ -43,7 +46,11 @@ async function fetchConfigFileContent(
       return await response.text();
     }
   } catch (error) {
-    console.error(`Error fetching ${filePath}:`, error);
+    if (log) {
+      log.error(`Error fetching ${filePath}:`, error);
+    } else {
+      console.error(`Error fetching ${filePath}:`, error);
+    }
   }
 
   return null;
@@ -52,17 +59,6 @@ async function fetchConfigFileContent(
 interface CliFileContent {
   path: string;
   content: string;
-}
-
-export async function analyzeAndGenerateDocs(
-  repo: GitHubRepo,
-  readme: string,
-  contents: RepoContents,
-  token: string | null,
-  ai?: AIBinding,
-  env?: Env
-): Promise<{ markdown: string; isCli: boolean }> {
-  return analyzeAndGenerateDocsWithStreaming(repo, readme, contents, token, ai, env);
 }
 
 export async function analyzeAndGenerateDocsWithStreaming(
@@ -74,11 +70,13 @@ export async function analyzeAndGenerateDocsWithStreaming(
   env?: Env,
   progressCallback?: (message: string) => Promise<void>
 ): Promise<{ markdown: string; isCli: boolean }> {
-  console.log(`[Analyzer] Processing ${repo.owner}/${repo.repo}...`);
-  console.log(`[Analyzer] Repo has ${contents.files.length} files`);
+  const log = createLogger(repo);
+  
+  log.log(`Processing ${repo.owner}/${repo.repo}...`);
+  log.log(`Repo has ${contents.files.length} files`);
 
   if (!ai) {
-    console.log('[Analyzer] AI not available, using basic extraction');
+    log.log('AI not available, using basic extraction');
     return {
       markdown: generateBasicMarkdown(repo, readme, contents),
       isCli: detectCliFromFiles(contents)
@@ -89,10 +87,10 @@ export async function analyzeAndGenerateDocsWithStreaming(
   if (env) {
     const rateLimit = await checkRateLimit(env, 'ai');
     if (!rateLimit.allowed) {
-      console.log(`[Analyzer] AI rate limit exceeded. Reset at ${rateLimit.resetTime}`);
+      log.log(`AI rate limit exceeded. Reset at ${rateLimit.resetTime}`);
       throw new Error(`RATE_LIMIT_EXCEEDED:${rateLimit.resetTime.toISOString()}`);
     }
-    console.log(`[Analyzer] Rate limit check passed. Remaining: ${rateLimit.remaining}`);
+    log.log(`Rate limit check passed. Remaining: ${rateLimit.remaining}`);
   }
 
   // Get config values with defaults
@@ -104,19 +102,19 @@ export async function analyzeAndGenerateDocsWithStreaming(
   const rawGithubTimeoutMs = env?.GITHUB_TIMEOUT_MS ? parseInt(env.GITHUB_TIMEOUT_MS, 10) : 10000;
 
   // Step 1: Use heuristic to pre-select likely CLI files (no AI)
-  console.log('[Analyzer] Pre-selecting CLI files...');
+  log.log('Pre-selecting CLI files...');
   if (progressCallback) {
     await progressCallback('Identifying CLI-related files...');
   }
-  const preselectedFiles = await heuristicFileSelection(repo, contents, token, maxFilesToAnalyze, rawGithubTimeoutMs);
-  console.log(`[Analyzer] Pre-selected ${preselectedFiles.length} files`);
+  const preselectedFiles = await heuristicFileSelection(repo, contents, token, maxFilesToAnalyze, rawGithubTimeoutMs, log);
+  log.log(`Pre-selected ${preselectedFiles.length} files`);
 
   if (progressCallback) {
     await progressCallback(`Found ${preselectedFiles.length} potential CLI files`);
   }
 
   if (preselectedFiles.length === 0) {
-    console.log('[Analyzer] No CLI files detected');
+    log.log('No CLI files detected');
     return {
       markdown: generateNotCliMarkdown(repo, readme),
       isCli: false
@@ -124,32 +122,32 @@ export async function analyzeAndGenerateDocsWithStreaming(
   }
 
   // Step 2: Fetch file contents
-  console.log('[Analyzer] Fetching file contents...');
+  log.log('Fetching file contents...');
   if (progressCallback) {
     await progressCallback('Fetching file contents...');
   }
-  const fileContents = await fetchFiles(repo, preselectedFiles, token, maxFileContentSize, rawGithubTimeoutMs);
+  const fileContents = await fetchFiles(repo, preselectedFiles, token, maxFileContentSize, rawGithubTimeoutMs, log);
 
   if (progressCallback) {
     await progressCallback(`Fetched ${fileContents.length} files`);
   }
 
   if (fileContents.length === 0) {
-    console.log('[Analyzer] Failed to fetch any files');
+    log.log('Failed to fetch any files');
     return {
       markdown: generateBasicMarkdown(repo, readme, contents),
       isCli: true
     };
   }
 
-  console.log(`[Analyzer] Successfully fetched ${fileContents.length} files`);
+  log.log(`Successfully fetched ${fileContents.length} files`);
 
   // Step 3: Single AI call to analyze everything and generate docs
-  console.log('[Analyzer] Analyzing and generating documentation...');
+  log.log('Analyzing and generating documentation...');
   if (progressCallback) {
     await progressCallback('Generating documentation with AI...');
   }
-  const markdown = await analyzeAndGenerateWithAI(repo, readme, fileContents, contents, ai, env, maxReadmeSize, aiMaxTokens, aiTemperature);
+  const markdown = await analyzeAndGenerateWithAI(repo, readme, fileContents, contents, ai, env, maxReadmeSize, aiMaxTokens, aiTemperature, log);
   
   if (progressCallback) {
     await progressCallback('Documentation generated successfully');
@@ -163,7 +161,8 @@ async function heuristicFileSelection(
   contents: RepoContents,
   token: string | null,
   maxFiles: number = 50,
-  rawGithubTimeoutMs: number = 10000
+  rawGithubTimeoutMs: number = 10000,
+  log: Logger
 ): Promise<string[]> {
   const selected = new Set<string>();
   const fileSet = new Set(contents.files);
@@ -198,19 +197,19 @@ async function heuristicFileSelection(
   // Parse Cargo.toml for [[bin]] entries (Rust projects)
   if (fileSet.has('Cargo.toml')) {
     try {
-      const cargoContent = await fetchConfigFileContent(repo.owner, repo.repo, 'Cargo.toml', token, rawGithubTimeoutMs);
+      const cargoContent = await fetchConfigFileContent(repo.owner, repo.repo, 'Cargo.toml', token, rawGithubTimeoutMs, log);
       if (cargoContent) {
         const binMatches = cargoContent.matchAll(/\[\[bin\]\][^\[]*?path\s*=\s*"([^"]+)"/gs);
         for (const match of binMatches) {
           const binPath = match[1];
           if (fileSet.has(binPath)) {
             selected.add(binPath);
-            console.log(`[Analyzer] Found bin entry in Cargo.toml: ${binPath}`);
+            log.log(`Found bin entry in Cargo.toml: ${binPath}`);
           }
         }
       }
     } catch (e) {
-      console.error('[Analyzer] Error parsing Cargo.toml:', e);
+      log.error('Error parsing Cargo.toml:', e);
     }
   }
 
@@ -263,12 +262,13 @@ async function fetchFiles(
   filePaths: string[],
   token: string | null,
   maxSize: number = 10000,
-  timeoutMs: number = 10000
+  timeoutMs: number = 10000,
+  log: Logger
 ): Promise<CliFileContent[]> {
   const results = await pMap(
     filePaths,
     async (filePath) => {
-      const content = await fetchConfigFileContent(repo.owner, repo.repo, filePath, token, timeoutMs);
+      const content = await fetchConfigFileContent(repo.owner, repo.repo, filePath, token, timeoutMs, log);
       if (!content) return null;
       
       const truncated = content.length > maxSize 
@@ -292,7 +292,8 @@ async function analyzeAndGenerateWithAI(
   env: Env | undefined,
   maxReadmeSize: number = 5000,
   maxTokens: number = 4000,
-  temperature: number = 0.2
+  temperature: number = 0.2,
+  log: Logger
 ): Promise<string> {
   // Build file context
   const fileContext = fileContents.map(file => {
@@ -392,7 +393,7 @@ Generate documentation following the format in your instructions. Be explicit ab
     });
 
     const generatedContent = response?.choices?.[0]?.message?.content || '';
-    console.log(`[Analyzer] Generated ${generatedContent.length} characters`);
+    log.log(`Generated ${generatedContent.length} characters`);
 
     return `# ${repo.repo}
 
@@ -407,7 +408,7 @@ ${generatedContent}
 *Analysis based on ${fileContents.length} source files*${additionalFiles.length > 0 ? ` (+ ${additionalFiles.length} additional files listed)` : ''}`;
 
   } catch (error) {
-    console.error('[Analyzer] Documentation generation error:', error);
+    log.error('Documentation generation error:', error);
     return generateBasicMarkdown(repo, readme, allContents);
   }
 }
