@@ -14,9 +14,12 @@ export interface AIResponse {
 
 // AI Binding Interface
 export interface AIBinding {
-  run(model: string, params: {
-    messages: Array<{ role: string; content: string }>;
-    max_tokens?: number;
-    temperature?: number;
-  }): Promise<AIResponse>;
+  run(
+    model: string,
+    params: {
+      messages: Array<{ role: string; content: string }>;
+      max_tokens?: number;
+      temperature?: number;
+    },
+  ): Promise<AIResponse>;
 }

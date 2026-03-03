@@ -1,43 +1,24 @@
-import { Env, GitHubRepo, RepoContents, AIBinding } from '../types';
-import { checkRateLimit } from '../rateLimiter';
-import { createLogger, Logger } from '../utils/logger';
+import { Env, GitHubRepo, RepoContents, AIBinding } from "../types";
+import { checkRateLimit } from "../rateLimiter";
+import { createLogger, Logger } from "../utils/logger";
+import { pMap } from "../utils/pmap";
 
-
-// Parallel map utility with concurrency limit
-async function pMap<T, R>(
-  items: T[],
-  mapper: (item: T) => Promise<R>,
-  options: { concurrency: number }
-): Promise<R[]> {
-  const results: R[] = [];
-  const { concurrency } = options;
-
-  for (let i = 0; i < items.length; i += concurrency) {
-    const batch = items.slice(i, i + concurrency);
-    const batchResults = await Promise.all(batch.map(mapper));
-    results.push(...batchResults);
-  }
-
-  return results;
-}
-
-// Helper to fetch file content from GitHub
 async function fetchConfigFileContent(
   owner: string,
   repo: string,
   filePath: string,
   token: string | null,
   timeoutMs: number = 10000,
-  log?: Logger
+  log?: Logger,
 ): Promise<string | null> {
   const url = `https://raw.githubusercontent.com/${owner}/${repo}/HEAD/${filePath}`;
 
   const headers: Record<string, string> = {
-    'User-Agent': 'clidocs/0.1.0'
+    "User-Agent": "clidocs/0.1.0",
   };
 
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+    headers["Authorization"] = `Bearer ${token}`;
   }
 
   try {
@@ -68,24 +49,24 @@ export async function analyzeAndGenerateDocsWithStreaming(
   token: string | null,
   ai?: AIBinding,
   env?: Env,
-  progressCallback?: (message: string) => Promise<void>
+  progressCallback?: (message: string) => Promise<void>,
 ): Promise<{ markdown: string; isCli: boolean }> {
   const log = createLogger(repo);
-  
+
   log.log(`Processing ${repo.owner}/${repo.repo}...`);
   log.log(`Repo has ${contents.files.length} files`);
 
   if (!ai) {
-    log.log('AI not available, using basic extraction');
+    log.log("AI not available, using basic extraction");
     return {
       markdown: generateBasicMarkdown(repo, readme, contents),
-      isCli: detectCliFromFiles(contents)
+      isCli: detectCliFromFiles(contents),
     };
   }
 
   // Check rate limit before using AI
   if (env) {
-    const rateLimit = await checkRateLimit(env, 'ai');
+    const rateLimit = await checkRateLimit(env, "ai");
     if (!rateLimit.allowed) {
       log.log(`AI rate limit exceeded. Reset at ${rateLimit.resetTime}`);
       throw new Error(`RATE_LIMIT_EXCEEDED:${rateLimit.resetTime.toISOString()}`);
@@ -102,11 +83,18 @@ export async function analyzeAndGenerateDocsWithStreaming(
   const rawGithubTimeoutMs = env?.GITHUB_TIMEOUT_MS ? parseInt(env.GITHUB_TIMEOUT_MS, 10) : 10000;
 
   // Step 1: Use heuristic to pre-select likely CLI files (no AI)
-  log.log('Pre-selecting CLI files...');
+  log.log("Pre-selecting CLI files...");
   if (progressCallback) {
-    await progressCallback('Identifying CLI-related files...');
+    await progressCallback("Identifying CLI-related files...");
   }
-  const preselectedFiles = await heuristicFileSelection(repo, contents, token, maxFilesToAnalyze, rawGithubTimeoutMs, log);
+  const preselectedFiles = await heuristicFileSelection(
+    repo,
+    contents,
+    token,
+    maxFilesToAnalyze,
+    rawGithubTimeoutMs,
+    log,
+  );
   log.log(`Pre-selected ${preselectedFiles.length} files`);
 
   if (progressCallback) {
@@ -114,17 +102,17 @@ export async function analyzeAndGenerateDocsWithStreaming(
   }
 
   if (preselectedFiles.length === 0) {
-    log.log('No CLI files detected');
+    log.log("No CLI files detected");
     return {
       markdown: generateNotCliMarkdown(repo, readme),
-      isCli: false
+      isCli: false,
     };
   }
 
   // Step 2: Fetch file contents
-  log.log('Fetching file contents...');
+  log.log("Fetching file contents...");
   if (progressCallback) {
-    await progressCallback('Fetching file contents...');
+    await progressCallback("Fetching file contents...");
   }
   const fileContents = await fetchFiles(repo, preselectedFiles, token, maxFileContentSize, rawGithubTimeoutMs, log);
 
@@ -133,24 +121,35 @@ export async function analyzeAndGenerateDocsWithStreaming(
   }
 
   if (fileContents.length === 0) {
-    log.log('Failed to fetch any files');
+    log.log("Failed to fetch any files");
     return {
       markdown: generateBasicMarkdown(repo, readme, contents),
-      isCli: true
+      isCli: true,
     };
   }
 
   log.log(`Successfully fetched ${fileContents.length} files`);
 
   // Step 3: Single AI call to analyze everything and generate docs
-  log.log('Analyzing and generating documentation...');
+  log.log("Analyzing and generating documentation...");
   if (progressCallback) {
-    await progressCallback('Generating documentation with AI...');
+    await progressCallback("Generating documentation with AI...");
   }
-  const markdown = await analyzeAndGenerateWithAI(repo, readme, fileContents, contents, ai, env, maxReadmeSize, aiMaxTokens, aiTemperature, log);
-  
+  const markdown = await analyzeAndGenerateWithAI(
+    repo,
+    readme,
+    fileContents,
+    contents,
+    ai,
+    env,
+    maxReadmeSize,
+    aiMaxTokens,
+    aiTemperature,
+    log,
+  );
+
   if (progressCallback) {
-    await progressCallback('Documentation generated successfully');
+    await progressCallback("Documentation generated successfully");
   }
 
   return { markdown, isCli: true };
@@ -162,7 +161,7 @@ async function heuristicFileSelection(
   token: string | null,
   maxFiles: number = 50,
   rawGithubTimeoutMs: number = 10000,
-  log: Logger
+  log: Logger,
 ): Promise<string[]> {
   const selected = new Set<string>();
   const fileSet = new Set(contents.files);
@@ -171,7 +170,7 @@ async function heuristicFileSelection(
   const addFiles = (files: string[], limit: number) => {
     for (const file of files) {
       if (selected.size >= limit) break;
-      if (!file.includes('_test') && !file.includes('test')) {
+      if (!file.includes("_test") && !file.includes("test")) {
         selected.add(file);
       }
     }
@@ -179,13 +178,21 @@ async function heuristicFileSelection(
 
   // Priority 1: Config files with CLI metadata
   const configFiles = [
-    'package.json', 'Cargo.toml', 'Cargo.lock', 'setup.py', 'setup.cfg',
-    'pyproject.toml', 'go.mod', 'go.sum', 'Gemfile', '*.gemspec'
+    "package.json",
+    "Cargo.toml",
+    "Cargo.lock",
+    "setup.py",
+    "setup.cfg",
+    "pyproject.toml",
+    "go.mod",
+    "go.sum",
+    "Gemfile",
+    "*.gemspec",
   ];
-  
+
   for (const pattern of configFiles) {
-    if (pattern.includes('*')) {
-      const regex = new RegExp(pattern.replace('*', '.*'));
+    if (pattern.includes("*")) {
+      const regex = new RegExp(pattern.replace("*", ".*"));
       for (const file of contents.files) {
         if (regex.test(file)) selected.add(file);
       }
@@ -195,11 +202,18 @@ async function heuristicFileSelection(
   }
 
   // Parse Cargo.toml for [[bin]] entries (Rust projects)
-  if (fileSet.has('Cargo.toml')) {
+  if (fileSet.has("Cargo.toml")) {
     try {
-      const cargoContent = await fetchConfigFileContent(repo.owner, repo.repo, 'Cargo.toml', token, rawGithubTimeoutMs, log);
+      const cargoContent = await fetchConfigFileContent(
+        repo.owner,
+        repo.repo,
+        "Cargo.toml",
+        token,
+        rawGithubTimeoutMs,
+        log,
+      );
       if (cargoContent) {
-        const binMatches = cargoContent.matchAll(/\[\[bin\]\][^\[]*?path\s*=\s*"([^"]+)"/gs);
+        const binMatches = cargoContent.matchAll(/\[\[bin\]\][^[]*?path\s*=\s*"([^"]+)"/gs);
         for (const match of binMatches) {
           const binPath = match[1];
           if (fileSet.has(binPath)) {
@@ -209,7 +223,7 @@ async function heuristicFileSelection(
         }
       }
     } catch (e) {
-      log.error('Error parsing Cargo.toml:', e);
+      log.error("Error parsing Cargo.toml:", e);
     }
   }
 
@@ -219,36 +233,52 @@ async function heuristicFileSelection(
     { pattern: /^(src\/main\.rs|.*\/src\/main\.rs)$/, limit: 30 },
     { pattern: /src\/bin\/.*\.rs$/, limit: 35 },
     { pattern: /crates\/[^/]+\/src\/main\.rs$/, limit: 40 },
-    { pattern: /src\/bin\/[^/]+\/main\.(c|cpp)$|src\/backend\/[^/]+\/main\.(c|cpp)$|^src\/main\.c$|\/main\.c$/, limit: 45 },
+    {
+      pattern: /src\/bin\/[^/]+\/main\.(c|cpp)$|src\/backend\/[^/]+\/main\.(c|cpp)$|^src\/main\.c$|\/main\.c$/,
+      limit: 45,
+    },
   ];
 
   for (const { pattern, limit } of cliPatterns) {
-    const matches = contents.files.filter(f => pattern.test(f));
+    const matches = contents.files.filter((f) => pattern.test(f));
     addFiles(matches, limit);
   }
 
   // General CLI directories
-  const cliDirs = ['bin/', 'cli/', 'src/cli/', 'src/cmd/'];
-  const cliDirFiles = contents.files.filter(f => 
-    cliDirs.some(dir => f.includes(dir)) && !f.includes('test') && !f.includes('_test.')
+  const cliDirs = ["bin/", "cli/", "src/cli/", "src/cmd/"];
+  const cliDirFiles = contents.files.filter(
+    (f) => cliDirs.some((dir) => f.includes(dir)) && !f.includes("test") && !f.includes("_test."),
   );
   addFiles(cliDirFiles, 35);
 
   // Priority 3: Main entry points by language
   const entryPoints = [
-    'main.go', 'cmd/root.go', 'index.js', 'cli.ts', 'cli.js',
-    'src/main.rs', 'main.rs', '__main__.py', 'main.py', 'cli.py',
-    'main.c', 'main.cpp', 'src/main.c', 'src/main.cpp',
-    'bin/console', 'exe/console', 'lib/cli.rb'
+    "main.go",
+    "cmd/root.go",
+    "index.js",
+    "cli.ts",
+    "cli.js",
+    "src/main.rs",
+    "main.rs",
+    "__main__.py",
+    "main.py",
+    "cli.py",
+    "main.c",
+    "main.cpp",
+    "src/main.c",
+    "src/main.cpp",
+    "bin/console",
+    "exe/console",
+    "lib/cli.rb",
   ];
-  
+
   for (const file of entryPoints) {
     if (selected.size >= 40) break;
     if (fileSet.has(file)) selected.add(file);
   }
 
   // Priority 4: Documentation files
-  const docFiles = ['README.md', 'README.rst', 'CONTRIBUTING.md', 'docs/CLI.md', 'docs/cli.md'];
+  const docFiles = ["README.md", "README.rst", "CONTRIBUTING.md", "docs/CLI.md", "docs/cli.md"];
   for (const file of docFiles) {
     if (selected.size >= 45) break;
     if (fileSet.has(file)) selected.add(file);
@@ -263,21 +293,19 @@ async function fetchFiles(
   token: string | null,
   maxSize: number = 10000,
   timeoutMs: number = 10000,
-  log: Logger
+  log: Logger,
 ): Promise<CliFileContent[]> {
   const results = await pMap(
     filePaths,
     async (filePath) => {
       const content = await fetchConfigFileContent(repo.owner, repo.repo, filePath, token, timeoutMs, log);
       if (!content) return null;
-      
-      const truncated = content.length > maxSize 
-        ? content.substring(0, maxSize) + '\n\n[File truncated...]'
-        : content;
-      
+
+      const truncated = content.length > maxSize ? content.substring(0, maxSize) + "\n\n[File truncated...]" : content;
+
       return { path: filePath, content: truncated };
     },
-    { concurrency: 10 }
+    { concurrency: 10 },
   );
 
   return results.filter((r): r is CliFileContent => r !== null);
@@ -293,31 +321,38 @@ async function analyzeAndGenerateWithAI(
   maxReadmeSize: number = 5000,
   maxTokens: number = 4000,
   temperature: number = 0.2,
-  log: Logger
+  log: Logger,
 ): Promise<string> {
   // Build file context
-  const fileContext = fileContents.map(file => {
-    return `\n### ${file.path}\n\`\`\`${getLanguageFromPath(file.path)}\n${file.content}\n\`\`\``;
-  }).join('\n');
+  const fileContext = fileContents
+    .map((file) => {
+      return `\n### ${file.path}\n\`\`\`${getLanguageFromPath(file.path)}\n${file.content}\n\`\`\``;
+    })
+    .join("\n");
 
   // Show additional files that weren't fetched
   const additionalFiles = allContents.files
-    .filter(f => !fileContents.find(fc => fc.path === f))
-    .filter(f => 
-      f.includes('cmd/') || f.includes('cli/') || f.includes('bin/') ||
-      f.includes('option') || f.includes('flag') || f.includes('arg') ||
-      f.endsWith('.md')
+    .filter((f) => !fileContents.find((fc) => fc.path === f))
+    .filter(
+      (f) =>
+        f.includes("cmd/") ||
+        f.includes("cli/") ||
+        f.includes("bin/") ||
+        f.includes("option") ||
+        f.includes("flag") ||
+        f.includes("arg") ||
+        f.endsWith(".md"),
     )
     .slice(0, 50);
 
-  const additionalContext = additionalFiles.length > 0 
-    ? `\n\nAdditional files in repository (not analyzed):\n${additionalFiles.map(f => `- ${f}`).join('\n')}`
-    : '';
+  const additionalContext =
+    additionalFiles.length > 0
+      ? `\n\nAdditional files in repository (not analyzed):\n${additionalFiles.map((f) => `- ${f}`).join("\n")}`
+      : "";
 
   // Truncate readme
-  const readmeContext = readme.length > maxReadmeSize 
-    ? readme.substring(0, maxReadmeSize) + '\n\n[README truncated...]'
-    : readme;
+  const readmeContext =
+    readme.length > maxReadmeSize ? readme.substring(0, maxReadmeSize) + "\n\n[README truncated...]" : readme;
 
   const messages = [
     {
@@ -361,7 +396,7 @@ OUTPUT FORMAT:
 [Where CLI data was found OR where it might be if not found]
 
 # CLI Examples
-[Practical examples based on verified commands]`
+[Practical examples based on verified commands]`,
     },
     {
       role: "user",
@@ -381,18 +416,18 @@ Analyze these files to determine:
 2. What are the CLI commands and flags? (look for argument parsing, command definitions)
 3. Where else might CLI data be? (suggest other files to check)
 
-Generate documentation following the format in your instructions. Be explicit about what you found and what you couldn't find.`
-    }
+Generate documentation following the format in your instructions. Be explicit about what you found and what you couldn't find.`,
+    },
   ];
 
   try {
-    const response = await ai.run('@cf/zai-org/glm-4.7-flash', {
+    const response = await ai.run("@cf/zai-org/glm-4.7-flash", {
       messages,
       max_tokens: maxTokens,
-      temperature: temperature
+      temperature: temperature,
     });
 
-    const generatedContent = response?.choices?.[0]?.message?.content || '';
+    const generatedContent = response?.choices?.[0]?.message?.content || "";
     log.log(`Generated ${generatedContent.length} characters`);
 
     return `# ${repo.repo}
@@ -405,28 +440,22 @@ ${generatedContent}
 
 *Generated by clidocs.io*
 *AI Model: GLM-4.7-Flash via Cloudflare Workers AI*
-*Analysis based on ${fileContents.length} source files*${additionalFiles.length > 0 ? ` (+ ${additionalFiles.length} additional files listed)` : ''}`;
-
+*Analysis based on ${fileContents.length} source files*${additionalFiles.length > 0 ? ` (+ ${additionalFiles.length} additional files listed)` : ""}`;
   } catch (error) {
-    log.error('Documentation generation error:', error);
+    log.error("Documentation generation error:", error);
     return generateBasicMarkdown(repo, readme, allContents);
   }
 }
 
 function detectCliFromFiles(contents: RepoContents): boolean {
-  const cliIndicators = [
-    'package.json', 'Cargo.toml', 'setup.py', 'go.mod',
-    'bin/', 'cmd/', 'cli/'
-  ];
-  
-  return contents.files.some(f => 
-    cliIndicators.some(indicator => f.includes(indicator))
-  );
+  const cliIndicators = ["package.json", "Cargo.toml", "setup.py", "go.mod", "bin/", "cmd/", "cli/"];
+
+  return contents.files.some((f) => cliIndicators.some((indicator) => f.includes(indicator)));
 }
 
 function generateNotCliMarkdown(repo: GitHubRepo, readme: string): string {
-  const lines = readme.split('\n');
-  const title = lines[0]?.replace(/^#+\s*/, '') || repo.repo;
+  const lines = readme.split("\n");
+  const title = lines[0]?.replace(/^#+\s*/, "") || repo.repo;
 
   return `# ${title}
 
@@ -441,20 +470,22 @@ This repository does not appear to be a CLI tool based on its file structure.
 }
 
 function generateBasicMarkdown(repo: GitHubRepo, readme: string, contents: RepoContents): string {
-  const lines = readme.split('\n');
-  const title = lines[0]?.replace(/^#+\s*/, '') || repo.repo;
+  const lines = readme.split("\n");
+  const title = lines[0]?.replace(/^#+\s*/, "") || repo.repo;
 
-  const cliFiles = contents.files.filter(f => 
-    f.includes('bin/') || f.includes('cmd/') || f.includes('cli/') || 
-    f === 'package.json' || f === 'Cargo.toml'
-  ).slice(0, 15);
+  const cliFiles = contents.files
+    .filter(
+      (f) =>
+        f.includes("bin/") || f.includes("cmd/") || f.includes("cli/") || f === "package.json" || f === "Cargo.toml",
+    )
+    .slice(0, 15);
 
   return `# ${title}
 
 Source: github.com/${repo.owner}/${repo.repo}
 
 **Detected CLI-related files:**
-${cliFiles.map(f => `- ${f}`).join('\n')}
+${cliFiles.map((f) => `- ${f}`).join("\n")}
 
 ## Overview
 
@@ -467,12 +498,19 @@ Please visit the repository for full documentation.
 }
 
 function getLanguageFromPath(path: string): string {
-  const ext = path.split('.').pop()?.toLowerCase() || '';
+  const ext = path.split(".").pop()?.toLowerCase() || "";
   const langMap: Record<string, string> = {
-    'js': 'javascript', 'ts': 'typescript', 'go': 'go',
-    'py': 'python', 'rs': 'rust', 'rb': 'ruby',
-    'json': 'json', 'toml': 'toml', 'yaml': 'yaml', 'yml': 'yaml',
-    'md': 'markdown'
+    js: "javascript",
+    ts: "typescript",
+    go: "go",
+    py: "python",
+    rs: "rust",
+    rb: "ruby",
+    json: "json",
+    toml: "toml",
+    yaml: "yaml",
+    yml: "yaml",
+    md: "markdown",
   };
-  return langMap[ext] || '';
+  return langMap[ext] || "";
 }

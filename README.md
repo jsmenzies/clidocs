@@ -28,6 +28,6 @@ https://clidocs.io/owner/repo
 
 <div align="center">
 
-*⚠️ Works half the time, every time*
+_⚠️ Works half the time, every time_
 
 </div>
