@@ -43,9 +43,9 @@ export default {
     
     const pathWithoutSlash = path.slice(1); // Remove leading slash
     
-    // Handle cache invalidation endpoint
+    // Handle cache invalidation endpoint (requires API key authentication)
     if (pathWithoutSlash === 'admin/invalidate-cache' && request.method === 'POST') {
-      return handleCacheInvalidation(env);
+      return handleCacheInvalidation(request, env);
     }
     
     // Parse owner/repo from path
@@ -99,7 +99,7 @@ export default {
     }
     
     // No cache or bypass - fetch from GitHub with streaming
-    return handleStreamingGeneration(repoData, env, cache, skipCache);
+    return handleStreamingGeneration(repoData, env, cache, skipCache, ctx);
   }
 };
 
@@ -107,7 +107,8 @@ async function handleStreamingGeneration(
   repoData: GitHubRepo,
   env: Env,
   cache: Cache,
-  skipCache: boolean
+  skipCache: boolean,
+  ctx: ExecutionContext
 ): Promise<Response> {
   const { owner, repo } = repoData;
   const github = new GitHubClient(env.GITHUB_TOKEN || null);
@@ -199,8 +200,8 @@ async function handleStreamingGeneration(
     }
   };
   
-  // Start background work without awaiting
-  backgroundWork();
+  // Start background work and ensure it completes using waitUntil
+  ctx.waitUntil(backgroundWork());
   
   // Return the streaming response immediately
   return new Response(readable, {
@@ -213,7 +214,42 @@ async function handleStreamingGeneration(
   });
 }
 
-async function handleCacheInvalidation(env: Env): Promise<Response> {
+async function handleCacheInvalidation(request: Request, env: Env): Promise<Response> {
+  // Verify API key authentication
+  const authHeader = request.headers.get('Authorization');
+  const expectedApiKey = env.ADMIN_API_KEY;
+  
+  if (!authHeader || !authHeader.startsWith('Bearer ') || !expectedApiKey) {
+    return new Response(
+      JSON.stringify({ 
+        success: false, 
+        error: 'Unauthorized - API key required' 
+      }),
+      {
+        status: 401,
+        headers: {
+          'Content-Type': 'application/json',
+          'WWW-Authenticate': 'Bearer'
+        }
+      }
+    );
+  }
+  
+  const providedApiKey = authHeader.slice(7); // Remove 'Bearer ' prefix
+  if (providedApiKey !== expectedApiKey) {
+    return new Response(
+      JSON.stringify({ 
+        success: false, 
+        error: 'Unauthorized - Invalid API key' 
+      }),
+      {
+        status: 401,
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+  }
   try {
     // Get all keys from KV
     const keys: string[] = [];

@@ -12,6 +12,9 @@ id = "dd332d8dc6b44c21bf0e715a6b68c294"
 AI_RATE_LIMIT = "100"           # Max AI calls per window
 AI_RATE_WINDOW = "3600"         # Window in seconds (1 hour = 3600)
 
+# Note: ADMIN_API_KEY should be set as a secret using:
+# wrangler secret put ADMIN_API_KEY
+
 [ai]
 binding = "AI"
 

@@ -205,7 +205,7 @@ export async function fetchConfigFileContent(
   }
   
   try {
-    const response = await fetch(url, { headers });
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
     if (response.ok) {
       return await response.text();
     }

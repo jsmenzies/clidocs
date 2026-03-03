@@ -20,7 +20,7 @@ export class GitHubClient {
       headers['Authorization'] = `Bearer ${this.token}`;
     }
 
-    const response = await fetch(url, { headers });
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
 
     if (response.status === 404) {
       return { files: [], directories: [], hasCliIndicators: false };
@@ -35,9 +35,8 @@ export class GitHubClient {
     }
 
     if (!response.ok) {
-      const body = await response.text().catch(() => 'No body');
-      console.error(`[GitHub] Repo contents error ${response.status}: ${body}`);
-      throw new Error(`GitHub API error: ${response.status} - ${response.statusText}. Body: ${body}`);
+      console.error(`[GitHub] Repo contents error ${response.status}`);
+      throw new Error(`GitHub API error: ${response.status} - ${response.statusText}`);
     }
 
     const data = await response.json() as { tree: Array<{ path: string; type: string }> };
@@ -68,7 +67,7 @@ export class GitHubClient {
       headers['Authorization'] = `Bearer ${this.token}`;
     }
     
-    const response = await fetch(url, { headers });
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
 
     if (response.status === 404) {
       return null;
@@ -83,9 +82,8 @@ export class GitHubClient {
     }
 
     if (!response.ok) {
-      const body = await response.text().catch(() => 'No body');
-      console.error(`[GitHub] README error ${response.status}: ${body}`);
-      throw new Error(`GitHub API error: ${response.status} - ${response.statusText}. Body: ${body}`);
+      console.error(`[GitHub] README error ${response.status}`);
+      throw new Error(`GitHub API error: ${response.status} - ${response.statusText}`);
     }
 
     const data = await response.json() as { content: string; encoding: string };
