@@ -1,52 +1,60 @@
-import { Env } from '../types';
+import { Env } from "../types";
+import { CONTENT_TYPE } from "../constants/headers";
+
+const BEARER_PREFIX = "Bearer ";
 
 export interface AuthResult {
   valid: boolean;
   response?: Response;
 }
 
-// Helper function to validate API key authentication
-export function validateApiKey(request: Request, env: Env): AuthResult {
-  const authHeader = request.headers.get('Authorization');
-  const expectedApiKey = env.ADMIN_API_KEY;
+function extractBearerToken(header: string | null): string | null {
+  if (!header || !header.startsWith(BEARER_PREFIX)) {
+    return null;
+  }
+  const token = header.slice(BEARER_PREFIX.length);
+  return token.length > 0 ? token : null;
+}
 
-  if (!authHeader || !authHeader.startsWith('Bearer ') || !expectedApiKey) {
+function createAuthError(message: string, includeChallenge = true): Response {
+  return new Response(
+    JSON.stringify({
+      success: false,
+      error: `Unauthorized - ${message}`,
+    }),
+    {
+      status: 401,
+      headers: {
+        "Content-Type": CONTENT_TYPE.JSON,
+        ...(includeChallenge && { "WWW-Authenticate": "Bearer" }),
+      },
+    },
+  );
+}
+
+export const validateApiKey = (request: Request, env: Env): AuthResult => {
+  const token = extractBearerToken(request.headers.get("Authorization"));
+
+  if (!token) {
     return {
       valid: false,
-      response: new Response(
-        JSON.stringify({
-          success: false,
-          error: 'Unauthorized - API key required'
-        }),
-        {
-          status: 401,
-          headers: {
-            'Content-Type': 'application/json',
-            'WWW-Authenticate': 'Bearer'
-          }
-        }
-      )
+      response: createAuthError("API key required"),
     };
   }
 
-  const providedApiKey = authHeader.slice(7); // Remove 'Bearer ' prefix
-  if (providedApiKey !== expectedApiKey) {
+  if (!env.ADMIN_API_KEY) {
     return {
       valid: false,
-      response: new Response(
-        JSON.stringify({
-          success: false,
-          error: 'Unauthorized - Invalid API key'
-        }),
-        {
-          status: 401,
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        }
-      )
+      response: createAuthError("Server misconfiguration", false),
+    };
+  }
+
+  if (token !== env.ADMIN_API_KEY) {
+    return {
+      valid: false,
+      response: createAuthError("Invalid API key"),
     };
   }
 
   return { valid: true };
-}
+};
