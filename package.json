@@ -11,7 +11,7 @@
     "format": "bun oxfmt"
   },
   "dependencies": {
-    "@cloudflare/workers-types": "4.20260426.1"
+    "@cloudflare/workers-types": "4.20260503.1"
   },
   "devDependencies": {
     "oxfmt": "0.46.0",
