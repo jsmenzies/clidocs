@@ -5,7 +5,7 @@
     "": {
       "name": "clidocs",
       "dependencies": {
-        "@cloudflare/workers-types": "4.20260522.1",
+        "@cloudflare/workers-types": "4.20260602.1",
       },
       "devDependencies": {
         "oxfmt": "0.51.0",
@@ -30,7 +30,7 @@
 
     "@cloudflare/workerd-windows-64": ["@cloudflare/workerd-windows-64@1.20260529.1", "", { "os": "win32", "cpu": "x64" }, "sha512-78xgJJeXxkKYumWdKGH1pybUsEjTreSvbJqirW9cth7ZGonqdv5pzAVt+WWcbu0OFcSHrtQFX6zWioPNFp0/xQ=="],
 
-    "@cloudflare/workers-types": ["@cloudflare/workers-types@4.20260522.1", "", {}, "sha512-UjKZprpYHAaBVipLfZA2GzTuWSTHyPXWRsaedwVEqyDe+VHwFi8RVtxGr1lceBDCwLDGRjlUwuwokX6O9GZY2A=="],
+    "@cloudflare/workers-types": ["@cloudflare/workers-types@4.20260602.1", "", {}, "sha512-0VssYYXHUn4VR1BaV+GXfhFpI53P2f6AIi17qyA9lQFyTs/u5ZF6IDPda2enDTIPFz/02872RM8CYVlXvRKtUA=="],
 
     "@cspotcode/source-map-support": ["@cspotcode/source-map-support@0.8.1", "", { "dependencies": { "@jridgewell/trace-mapping": "0.3.9" } }, "sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw=="],
 
