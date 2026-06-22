@@ -20,7 +20,7 @@ function parseRepoParams(pathname: string): ParseResult {
             "Content-Type": CONTENT_TYPE.MARKDOWN,
             "X-Error": "invalid-path",
           },
-        }
+        },
       ),
     };
   }
@@ -59,16 +59,11 @@ function unauthorized(): Response {
         "Content-Type": CONTENT_TYPE.JSON,
         "WWW-Authenticate": "Bearer",
       },
-    }
+    },
   );
 }
 
-async function getCachedResponse(
-  cache: Cache,
-  owner: string,
-  repo: string,
-  env: Env
-): Promise<Response | null> {
+async function getCachedResponse(cache: Cache, owner: string, repo: string, env: Env): Promise<Response | null> {
   const cached = await cache.get(owner, repo);
   if (!cached) return null;
 
@@ -85,12 +80,7 @@ async function getCachedResponse(
   });
 }
 
-export async function handleDocsRoute({
-  request,
-  env,
-  ctx,
-  url,
-}: HandlerContext): Promise<Response> {
+export async function handleDocsRoute({ request, env, ctx, url }: HandlerContext): Promise<Response> {
   const parseResult = parseRepoParams(url.pathname);
   if (!parseResult.success) {
     return parseResult.error;
@@ -114,11 +104,5 @@ export async function handleDocsRoute({
     }
   }
 
-  return handleStreamingGeneration(
-    { owner, repo },
-    env,
-    cache,
-    skipCache,
-    ctx
-  );
+  return handleStreamingGeneration({ owner, repo }, env, cache, skipCache, ctx);
 }

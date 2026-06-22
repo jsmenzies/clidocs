@@ -5,14 +5,7 @@ import { analyzeAndGenerateDocsWithStreaming } from "../llm/analyzer";
 import { trackRepoView } from "../utils/analytics";
 import { CONTENT_TYPE, CACHE_CONTROL } from "../constants/headers";
 
-const CLI_FILE_PATTERNS = [
-  /cmd\//,
-  /cli\//,
-  /bin\//,
-  /^package\.json$/,
-  /^Cargo\.toml$/,
-  /\.md$/,
-] as const;
+const CLI_FILE_PATTERNS = [/cmd\//, /cli\//, /bin\//, /^package\.json$/, /^Cargo\.toml$/, /\.md$/] as const;
 
 const DEFAULT_GITHUB_TIMEOUT_MS = 10000;
 const RATE_LIMIT_PREFIX = "RATE_LIMIT_EXCEEDED:";
@@ -23,8 +16,6 @@ const ResultStatus = {
   RATE_LIMITED: "rate_limited",
   ERROR: "error",
 } as const;
-
-type ResultStatusValue = (typeof ResultStatus)[keyof typeof ResultStatus];
 
 class RateLimitError extends Error {
   readonly resetTime: Date;
@@ -80,7 +71,10 @@ class DocGenerationService {
 
     await this.writeLine(writer, `# Loading CLI documentation for ${owner}/${repo}...`);
     await this.writeLine(writer, "");
-    await this.writeStatus(writer, ctx.skipCache ? "Bypassing cache..." : "Cache miss - generating fresh documentation...");
+    await this.writeStatus(
+      writer,
+      ctx.skipCache ? "Bypassing cache..." : "Cache miss - generating fresh documentation...",
+    );
     await this.writeStatus(writer, "Fetching repository data...");
 
     const [readme, repoContents] = await Promise.all([
@@ -124,9 +118,7 @@ class DocGenerationService {
     return cacheEntry;
   }
 
-  private createProgressCallback(
-    writer: WritableStreamDefaultWriter<Uint8Array>,
-  ): (message: string) => Promise<void> {
+  private createProgressCallback(writer: WritableStreamDefaultWriter<Uint8Array>): (message: string) => Promise<void> {
     return (message: string) => this.writeStatus(writer, message);
   }
 
@@ -214,24 +206,16 @@ class DocGenerationService {
     );
   }
 
-  private async writeLine(
-    writer: WritableStreamDefaultWriter<Uint8Array>,
-    line: string,
-  ): Promise<void> {
+  private async writeLine(writer: WritableStreamDefaultWriter<Uint8Array>, line: string): Promise<void> {
     await writer.write(this.encoder.encode(line + "\n"));
   }
 
-  private async writeStatus(
-    writer: WritableStreamDefaultWriter<Uint8Array>,
-    message: string,
-  ): Promise<void> {
+  private async writeStatus(writer: WritableStreamDefaultWriter<Uint8Array>, message: string): Promise<void> {
     await writer.write(this.encoder.encode(`> ${message}\n`));
   }
 
   private calculateFilesAnalyzed(files: readonly string[]): number {
-    return files.filter((file) =>
-      CLI_FILE_PATTERNS.some((pattern) => pattern.test(file)),
-    ).length;
+    return files.filter((file) => CLI_FILE_PATTERNS.some((pattern) => pattern.test(file))).length;
   }
 
   private trackSuccess(repoData: GitHubRepo, ctx: DocGenerationContext): void {
@@ -255,9 +239,7 @@ export async function handleStreamingGeneration(
   skipCache: boolean,
   ctx: ExecutionContext,
 ): Promise<Response> {
-  const githubTimeout = env.GITHUB_TIMEOUT_MS
-    ? parseInt(env.GITHUB_TIMEOUT_MS, 10)
-    : DEFAULT_GITHUB_TIMEOUT_MS;
+  const githubTimeout = env.GITHUB_TIMEOUT_MS ? parseInt(env.GITHUB_TIMEOUT_MS, 10) : DEFAULT_GITHUB_TIMEOUT_MS;
   const github = new GitHubClient(env.GITHUB_TOKEN || null, githubTimeout);
 
   const { readable, writable } = new TransformStream();

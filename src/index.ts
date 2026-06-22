@@ -22,14 +22,9 @@ const routes: Array<{
 ];
 
 export default {
-  async fetch(
-    request: Request,
-    env: Env,
-    ctx: ExecutionContext
-  ): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-    const route =
-      routes.find((r) => r.match(url.pathname)) ?? routes[routes.length - 1]!;
+    const route = routes.find((r) => r.match(url.pathname)) ?? routes[routes.length - 1]!;
 
     return route.handler({ request, env, ctx, url });
   },

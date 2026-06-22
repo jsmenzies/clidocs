@@ -8,7 +8,9 @@
     "deploy": "bun wrangler deploy",
     "typecheck": "bun tsc --noEmit",
     "lint": "bun oxlint",
-    "format": "bun oxfmt"
+    "lint:prod": "bun oxlint src",
+    "format": "bun oxfmt",
+    "format:prod": "bun oxfmt --check src"
   },
   "dependencies": {
     "@cloudflare/workers-types": "4.20260615.1"
