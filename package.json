@@ -15,7 +15,7 @@
   },
   "devDependencies": {
     "oxfmt": "0.56.0",
-    "oxlint": "1.70.0",
+    "oxlint": "1.71.0",
     "typescript": "6.0.3",
     "wrangler": "4.103.0"
   }
